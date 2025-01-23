@@ -1,0 +1,12 @@
+{
+    "data_base_dir": "./data",
+    "embedding_base_dir": "./embeddings",
+    "existing_ckpt_filepath": null,
+    "json_data_list": "./temp_work_dir/datalist.json",
+    "log_dir": "./logs",
+    "model_dir": "./models",
+    "model_filename": "diff_unet_ckpt.pt",
+    "output_dir": "./predictions",
+    "output_prefix": "unet_2d",
+    "trained_autoencoder_path": "./models/autoencoder_epoch17.pt"
+}
