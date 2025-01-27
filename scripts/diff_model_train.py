@@ -45,11 +45,17 @@ def load_filenames(data_list_path: str) -> list:
     with open(data_list_path, "r") as file:
         json_data = json.load(file)
     filenames_train = json_data["training"]
-    return [_item["image"].replace(".nii.gz", "_emb.nii.gz") for _item in filenames_train]
+    return [
+        _item["image"].replace(".nii.gz", "_emb.nii.gz") for _item in filenames_train
+    ]
 
 
 def prepare_data(
-    train_files: list, device: torch.device, cache_rate: float, num_workers: int = 2, batch_size: int = 1
+    train_files: list,
+    device: torch.device,
+    cache_rate: float,
+    num_workers: int = 2,
+    batch_size: int = 1,
 ) -> DataLoader:
     """
     Prepare training data.
@@ -74,26 +80,37 @@ def prepare_data(
             monai.transforms.LoadImaged(keys=["image"]),
             monai.transforms.EnsureChannelFirstd(keys=["image"]),
             monai.transforms.Lambdad(
-                keys="top_region_index", func=lambda x: _load_data_from_file(x, "top_region_index")
+                keys="top_region_index",
+                func=lambda x: _load_data_from_file(x, "top_region_index"),
             ),
             monai.transforms.Lambdad(
-                keys="bottom_region_index", func=lambda x: _load_data_from_file(x, "bottom_region_index")
+                keys="bottom_region_index",
+                func=lambda x: _load_data_from_file(x, "bottom_region_index"),
             ),
-            monai.transforms.Lambdad(keys="spacing", func=lambda x: _load_data_from_file(x, "spacing")),
+            monai.transforms.Lambdad(
+                keys="spacing", func=lambda x: _load_data_from_file(x, "spacing")
+            ),
             monai.transforms.Lambdad(keys="top_region_index", func=lambda x: x * 1e2),
-            monai.transforms.Lambdad(keys="bottom_region_index", func=lambda x: x * 1e2),
+            monai.transforms.Lambdad(
+                keys="bottom_region_index", func=lambda x: x * 1e2
+            ),
             monai.transforms.Lambdad(keys="spacing", func=lambda x: x * 1e2),
         ]
     )
 
     train_ds = monai.data.CacheDataset(
-        data=train_files, transform=train_transforms, cache_rate=cache_rate, num_workers=num_workers
+        data=train_files,
+        transform=train_transforms,
+        cache_rate=cache_rate,
+        num_workers=num_workers,
     )
 
     return DataLoader(train_ds, num_workers=6, batch_size=batch_size, shuffle=True)
 
 
-def load_unet(args: argparse.Namespace, device: torch.device, logger: logging.Logger) -> torch.nn.Module:
+def load_unet(
+    args: argparse.Namespace, device: torch.device, logger: logging.Logger
+) -> torch.nn.Module:
     """
     Load the UNet model.
 
@@ -109,12 +126,16 @@ def load_unet(args: argparse.Namespace, device: torch.device, logger: logging.Lo
     unet = torch.nn.SyncBatchNorm.convert_sync_batchnorm(unet)
 
     if dist.is_initialized():
-        unet = DistributedDataParallel(unet, device_ids=[device], find_unused_parameters=True)
+        unet = DistributedDataParallel(
+            unet, device_ids=[device], find_unused_parameters=True
+        )
 
     if args.existing_ckpt_filepath is None:
         logger.info("Training from scratch.")
     else:
-        checkpoint_unet = torch.load(f"{args.existing_ckpt_filepath}", map_location=device)
+        checkpoint_unet = torch.load(
+            f"{args.existing_ckpt_filepath}", map_location=device
+        )
         if dist.is_initialized():
             unet.module.load_state_dict(checkpoint_unet["unet_state_dict"], strict=True)
         else:
@@ -124,7 +145,9 @@ def load_unet(args: argparse.Namespace, device: torch.device, logger: logging.Lo
     return unet
 
 
-def calculate_scale_factor(train_loader: DataLoader, device: torch.device, logger: logging.Logger) -> torch.Tensor:
+def calculate_scale_factor(
+    train_loader: DataLoader, device: torch.device, logger: logging.Logger
+) -> torch.Tensor:
     """
     Calculate the scaling factor for the dataset.
 
@@ -162,7 +185,9 @@ def create_optimizer(model: torch.nn.Module, lr: float) -> torch.optim.Optimizer
     return torch.optim.Adam(params=model.parameters(), lr=lr)
 
 
-def create_lr_scheduler(optimizer: torch.optim.Optimizer, total_steps: int) -> torch.optim.lr_scheduler.PolynomialLR:
+def create_lr_scheduler(
+    optimizer: torch.optim.Optimizer, total_steps: int
+) -> torch.optim.lr_scheduler.PolynomialLR:
     """
     Create learning rate scheduler.
 
@@ -173,7 +198,9 @@ def create_lr_scheduler(optimizer: torch.optim.Optimizer, total_steps: int) -> t
     Returns:
         torch.optim.lr_scheduler.PolynomialLR: Created learning rate scheduler.
     """
-    return torch.optim.lr_scheduler.PolynomialLR(optimizer, total_iters=total_steps, power=2.0)
+    return torch.optim.lr_scheduler.PolynomialLR(
+        optimizer, total_iters=total_steps, power=2.0
+    )
 
 
 def train_one_epoch(
@@ -239,12 +266,23 @@ def train_one_epoch(
 
         with autocast("cuda", enabled=amp):
             noise = torch.randn(
-                (num_images_per_batch, 4, images.size(-3), images.size(-2), images.size(-1)), device=device
+                (
+                    num_images_per_batch,
+                    4,
+                    images.size(-3),
+                    images.size(-2),
+                    images.size(-1),
+                ),
+                device=device,
             )
 
-            timesteps = torch.randint(0, num_train_timesteps, (images.shape[0],), device=images.device).long()
+            timesteps = torch.randint(
+                0, num_train_timesteps, (images.shape[0],), device=images.device
+            ).long()
 
-            noisy_latent = noise_scheduler.add_noise(original_samples=images, noise=noise, timesteps=timesteps)
+            noisy_latent = noise_scheduler.add_noise(
+                original_samples=images, noise=noise, timesteps=timesteps
+            )
 
             noise_pred = unet(
                 x=noisy_latent,
@@ -272,7 +310,12 @@ def train_one_epoch(
         if local_rank == 0:
             logger.info(
                 "[{0}] epoch {1}, iter {2}/{3}, loss: {4:.4f}, lr: {5:.12f}.".format(
-                    str(datetime.now())[:19], epoch + 1, _iter, len(train_loader), loss.item(), current_lr
+                    str(datetime.now())[:19],
+                    epoch + 1,
+                    _iter,
+                    len(train_loader),
+                    loss.item(),
+                    current_lr,
                 )
             )
 
@@ -303,7 +346,9 @@ def save_checkpoint(
         ckpt_folder (str): Checkpoint folder path.
         args (argparse.Namespace): Configuration arguments.
     """
-    unet_state_dict = unet.module.state_dict() if dist.is_initialized() else unet.state_dict()
+    unet_state_dict = (
+        unet.module.state_dict() if dist.is_initialized() else unet.state_dict()
+    )
     torch.save(
         {
             "epoch": epoch + 1,
@@ -317,7 +362,11 @@ def save_checkpoint(
 
 
 def diff_model_train(
-    env_config_path: str, model_config_path: str, model_def_path: str, num_gpus: int, amp: bool = True
+    env_config_path: str,
+    model_config_path: str,
+    model_def_path: str,
+    num_gpus: int,
+    amp: bool = True,
 ) -> None:
     """
     Main function to train a diffusion model.
@@ -341,7 +390,9 @@ def diff_model_train(
         logger.info(f"[config] data_list -> {args.json_data_list}.")
         logger.info(f"[config] lr -> {args.diffusion_unet_train['lr']}.")
         logger.info(f"[config] num_epochs -> {args.diffusion_unet_train['n_epochs']}.")
-        logger.info(f"[config] num_train_timesteps -> {args.noise_scheduler['num_train_timesteps']}.")
+        logger.info(
+            f"[config] num_train_timesteps -> {args.noise_scheduler['num_train_timesteps']}."
+        )
 
         Path(args.model_dir).mkdir(parents=True, exist_ok=True)
 
@@ -357,15 +408,26 @@ def diff_model_train(
 
         str_info = os.path.join(args.embedding_base_dir, filenames_train[_i]) + ".json"
         train_files.append(
-            {"image": str_img, "top_region_index": str_info, "bottom_region_index": str_info, "spacing": str_info}
+            {
+                "image": str_img,
+                "top_region_index": str_info,
+                "bottom_region_index": str_info,
+                "spacing": str_info,
+            }
         )
     if dist.is_initialized():
         train_files = partition_dataset(
-            data=train_files, shuffle=True, num_partitions=dist.get_world_size(), even_divisible=True
+            data=train_files,
+            shuffle=True,
+            num_partitions=dist.get_world_size(),
+            even_divisible=True,
         )[local_rank]
 
     train_loader = prepare_data(
-        train_files, device, args.diffusion_unet_train["cache_rate"], batch_size=args.diffusion_unet_train["batch_size"]
+        train_files,
+        device,
+        args.diffusion_unet_train["cache_rate"],
+        batch_size=args.diffusion_unet_train["batch_size"],
     )
 
     unet = load_unet(args, device, logger)
@@ -374,9 +436,9 @@ def diff_model_train(
     scale_factor = calculate_scale_factor(train_loader, device, logger)
     optimizer = create_optimizer(unet, args.diffusion_unet_train["lr"])
 
-    total_steps = (args.diffusion_unet_train["n_epochs"] * len(train_loader.dataset)) / args.diffusion_unet_train[
-        "batch_size"
-    ]
+    total_steps = (
+        args.diffusion_unet_train["n_epochs"] * len(train_loader.dataset)
+    ) / args.diffusion_unet_train["batch_size"]
     lr_scheduler = create_lr_scheduler(optimizer, total_steps)
     loss_pt = torch.nn.L1Loss()
     scaler = GradScaler("cuda")
@@ -427,20 +489,32 @@ if __name__ == "__main__":
     parser.add_argument(
         "--env_config",
         type=str,
-        default="./configs/environment_maisi_diff_model_train.json",
+        default="./configs_old/environment_maisi_diff_model_train.json",
         help="Path to environment configuration file",
     )
     parser.add_argument(
         "--model_config",
         type=str,
-        default="./configs/config_maisi_diff_model_train.json",
+        default="./configs_old/config_maisi_diff_model_train.json",
         help="Path to model training/inference configuration",
     )
     parser.add_argument(
-        "--model_def", type=str, default="./configs/config_maisi.json", help="Path to model definition file"
+        "--model_def",
+        type=str,
+        default="./configs_old/config_maisi.json",
+        help="Path to model definition file",
     )
-    parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs to use for training")
-    parser.add_argument("--no_amp", dest="amp", action="store_false", help="Disable automatic mixed precision training")
+    parser.add_argument(
+        "--num_gpus", type=int, default=1, help="Number of GPUs to use for training"
+    )
+    parser.add_argument(
+        "--no_amp",
+        dest="amp",
+        action="store_false",
+        help="Disable automatic mixed precision training",
+    )
 
     args = parser.parse_args()
-    diff_model_train(args.env_config, args.model_config, args.model_def, args.num_gpus, args.amp)
+    diff_model_train(
+        args.env_config, args.model_config, args.model_def, args.num_gpus, args.amp
+    )

@@ -33,19 +33,19 @@ def main():
     parser.add_argument(
         "-e",
         "--environment-file",
-        default="./configs/environment.json",
+        default="./configs_old/environment.json",
         help="environment json file that stores environment path",
     )
     parser.add_argument(
         "-c",
         "--config-file",
-        default="./configs/config_maisi.json",
+        default="./configs_old/config_maisi.json",
         help="config json file that stores network hyper-parameters",
     )
     parser.add_argument(
         "-i",
         "--inference-file",
-        default="./configs/config_infer.json",
+        default="./configs_old/config_infer.json",
         help="config json file that stores inference hyper-parameters",
     )
     parser.add_argument(
@@ -95,11 +95,11 @@ def main():
             "url": "https://developer.download.nvidia.com/assets/Clara/monai/tutorials/model_zoo/model_maisi_mask_generation_diffusion_unet_v2.pt",
         },
         {
-            "path": "configs/candidate_masks_flexible_size_and_spacing_3000.json",
+            "path": "configs_old/candidate_masks_flexible_size_and_spacing_3000.json",
             "url": "https://developer.download.nvidia.com/assets/Clara/monai/tutorials/candidate_masks_flexible_size_and_spacing_3000.json",
         },
         {
-            "path": "configs/all_anatomy_size_condtions.json",
+            "path": "configs_old/all_anatomy_size_condtions.json",
             "url": "https://developer.download.nvidia.com/assets/Clara/monai/tutorials/all_anatomy_size_condtions.json",
         },
         {
@@ -109,11 +109,15 @@ def main():
     ]
 
     for file in files:
-        file["path"] = file["path"] if "datasets/" not in file["path"] else os.path.join(root_dir, file["path"])
+        file["path"] = (
+            file["path"]
+            if "datasets/" not in file["path"]
+            else os.path.join(root_dir, file["path"])
+        )
         download_url(url=file["url"], filepath=file["path"])
 
     # ## Read in environment setting, including data directory, model directory, and output directory
-    # The information for data directory, model directory, and output directory are saved in ./configs/environment.json
+    # The information for data directory, model directory, and output directory are saved in ./configs_old/environment.json
     env_dict = json.load(open(args.environment_file, "r"))
     for k, v in env_dict.items():
         # Update the path to the downloaded dataset in MONAI_DATA_DIRECTORY
@@ -124,7 +128,7 @@ def main():
 
     # ## Read in configuration setting, including network definition, body region and anatomy to generate, etc.
     #
-    # The information for the inference input, like body region and anatomy to generate, is stored in "./configs/config_infer.json".
+    # The information for the inference input, like body region and anatomy to generate, is stored in "./configs_old/config_infer.json".
     # Please refer to README.md for the details.
     config_dict = json.load(open(args.config_file, "r"))
     for k, v in config_dict.items():
@@ -134,8 +138,12 @@ def main():
     config_infer_dict = json.load(open(args.inference_file, "r"))
     # override num_split if asked
     if "autoencoder_tp_num_splits" in config_infer_dict:
-        args.autoencoder_def["num_splits"] = config_infer_dict["autoencoder_tp_num_splits"]
-        args.mask_generation_autoencoder_def["num_splits"] = config_infer_dict["autoencoder_tp_num_splits"]
+        args.autoencoder_def["num_splits"] = config_infer_dict[
+            "autoencoder_tp_num_splits"
+        ]
+        args.mask_generation_autoencoder_def["num_splits"] = config_infer_dict[
+            "autoencoder_tp_num_splits"
+        ]
     for k, v in config_infer_dict.items():
         setattr(args, k, v)
         print(f"{k}: {v}")
@@ -148,13 +156,20 @@ def main():
         args.spacing,
         args.controllable_anatomy_size,
     )
-    latent_shape = [args.latent_channels, args.output_size[0] // 4, args.output_size[1] // 4, args.output_size[2] // 4]
+    latent_shape = [
+        args.latent_channels,
+        args.output_size[0] // 4,
+        args.output_size[1] // 4,
+        args.output_size[2] // 4,
+    ]
     print("Network definition and inference inputs have been loaded.")
 
     # ## Initialize networks and noise scheduler, then load the trained model weights.
     # The networks and noise scheduler are defined in `config_file`. We will read them in and load the model weights.
     noise_scheduler = define_instance(args, "noise_scheduler")
-    mask_generation_noise_scheduler = define_instance(args, "mask_generation_noise_scheduler")
+    mask_generation_noise_scheduler = define_instance(
+        args, "mask_generation_noise_scheduler"
+    )
 
     device = torch.device("cuda")
 
@@ -164,22 +179,38 @@ def main():
 
     diffusion_unet = define_instance(args, "diffusion_unet_def").to(device)
     checkpoint_diffusion_unet = torch.load(args.trained_diffusion_path)
-    diffusion_unet.load_state_dict(checkpoint_diffusion_unet["unet_state_dict"], strict=True)
+    diffusion_unet.load_state_dict(
+        checkpoint_diffusion_unet["unet_state_dict"], strict=True
+    )
     scale_factor = checkpoint_diffusion_unet["scale_factor"].to(device)
 
     controlnet = define_instance(args, "controlnet_def").to(device)
     checkpoint_controlnet = torch.load(args.trained_controlnet_path)
     monai.networks.utils.copy_model_state(controlnet, diffusion_unet.state_dict())
-    controlnet.load_state_dict(checkpoint_controlnet["controlnet_state_dict"], strict=True)
+    controlnet.load_state_dict(
+        checkpoint_controlnet["controlnet_state_dict"], strict=True
+    )
 
-    mask_generation_autoencoder = define_instance(args, "mask_generation_autoencoder_def").to(device)
-    checkpoint_mask_generation_autoencoder = torch.load(args.trained_mask_generation_autoencoder_path)
+    mask_generation_autoencoder = define_instance(
+        args, "mask_generation_autoencoder_def"
+    ).to(device)
+    checkpoint_mask_generation_autoencoder = torch.load(
+        args.trained_mask_generation_autoencoder_path
+    )
     mask_generation_autoencoder.load_state_dict(checkpoint_mask_generation_autoencoder)
 
-    mask_generation_diffusion_unet = define_instance(args, "mask_generation_diffusion_def").to(device)
-    checkpoint_mask_generation_diffusion_unet = torch.load(args.trained_mask_generation_diffusion_path)
-    mask_generation_diffusion_unet.load_state_dict(checkpoint_mask_generation_diffusion_unet["unet_state_dict"])
-    mask_generation_scale_factor = checkpoint_mask_generation_diffusion_unet["scale_factor"]
+    mask_generation_diffusion_unet = define_instance(
+        args, "mask_generation_diffusion_def"
+    ).to(device)
+    checkpoint_mask_generation_diffusion_unet = torch.load(
+        args.trained_mask_generation_diffusion_path
+    )
+    mask_generation_diffusion_unet.load_state_dict(
+        checkpoint_mask_generation_diffusion_unet["unet_state_dict"]
+    )
+    mask_generation_scale_factor = checkpoint_mask_generation_diffusion_unet[
+        "scale_factor"
+    ]
 
     print("All the trained model weights have been loaded.")
 

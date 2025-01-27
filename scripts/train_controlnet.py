@@ -27,7 +27,12 @@ from torch.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 
-from .utils import binarize_labels, define_instance, prepare_maisi_controlnet_json_dataloader, setup_ddp
+from .utils import (
+    binarize_labels,
+    define_instance,
+    prepare_maisi_controlnet_json_dataloader,
+    setup_ddp,
+)
 
 
 def main():
@@ -35,22 +40,24 @@ def main():
     parser.add_argument(
         "-e",
         "--environment-file",
-        default="./configs/environment_maisi_controlnet_train.json",
+        default="./configs_old/environment_maisi_controlnet_train.json",
         help="environment json file that stores environment path",
     )
     parser.add_argument(
         "-c",
         "--config-file",
-        default="./configs/config_maisi.json",
+        default="./configs_old/config_maisi.json",
         help="config json file that stores network hyper-parameters",
     )
     parser.add_argument(
         "-t",
         "--training-config",
-        default="./configs/config_maisi_controlnet_train.json",
+        default="./configs_old/config_maisi_controlnet_train.json",
         help="config json file that stores training hyper-parameters",
     )
-    parser.add_argument("-g", "--gpus", default=1, type=int, help="number of gpus per node")
+    parser.add_argument(
+        "-g", "--gpus", default=1, type=int, help="number of gpus per node"
+    )
     args = parser.parse_args()
 
     # Step 0: configuration
@@ -109,7 +116,9 @@ def main():
     if args.trained_diffusion_path is not None:
         if not os.path.exists(args.trained_diffusion_path):
             raise ValueError("Please download the trained diffusion unet checkpoint.")
-        diffusion_model_ckpt = torch.load(args.trained_diffusion_path, map_location=device)
+        diffusion_model_ckpt = torch.load(
+            args.trained_diffusion_path, map_location=device
+        )
         unet.load_state_dict(diffusion_model_ckpt["unet_state_dict"])
         # load scale factor from diffusion model checkpoint
         scale_factor = diffusion_model_ckpt["scale_factor"]
@@ -129,9 +138,13 @@ def main():
         if not os.path.exists(args.trained_controlnet_path):
             raise ValueError("Please download the trained ControlNet checkpoint.")
         controlnet.load_state_dict(
-            torch.load(args.trained_controlnet_path, map_location=device)["controlnet_state_dict"]
+            torch.load(args.trained_controlnet_path, map_location=device)[
+                "controlnet_state_dict"
+            ]
         )
-        logger.info(f"load trained controlnet model from {args.trained_controlnet_path}")
+        logger.info(
+            f"load trained controlnet model from {args.trained_controlnet_path}"
+        )
     else:
         logger.info("train controlnet model from scratch.")
     # we freeze the parameters of the diffusion model.
@@ -141,16 +154,27 @@ def main():
     noise_scheduler = define_instance(args, "noise_scheduler")
 
     if use_ddp:
-        controlnet = DDP(controlnet, device_ids=[device], output_device=rank, find_unused_parameters=True)
+        controlnet = DDP(
+            controlnet,
+            device_ids=[device],
+            output_device=rank,
+            find_unused_parameters=True,
+        )
 
     # Step 3: training config
     weighted_loss = args.controlnet_train["weighted_loss"]
     weighted_loss_label = args.controlnet_train["weighted_loss_label"]
-    optimizer = torch.optim.AdamW(params=controlnet.parameters(), lr=args.controlnet_train["lr"])
-    total_steps = (args.controlnet_train["n_epochs"] * len(train_loader.dataset)) / args.controlnet_train["batch_size"]
+    optimizer = torch.optim.AdamW(
+        params=controlnet.parameters(), lr=args.controlnet_train["lr"]
+    )
+    total_steps = (
+        args.controlnet_train["n_epochs"] * len(train_loader.dataset)
+    ) / args.controlnet_train["batch_size"]
     logger.info(f"total number of training steps: {total_steps}.")
 
-    lr_scheduler = torch.optim.lr_scheduler.PolynomialLR(optimizer, total_iters=total_steps, power=2.0)
+    lr_scheduler = torch.optim.lr_scheduler.PolynomialLR(
+        optimizer, total_iters=total_steps, power=2.0
+    )
 
     # Step 4: training
     n_epochs = args.controlnet_train["n_epochs"]
@@ -159,7 +183,9 @@ def main():
     best_loss = 1e4
 
     if weighted_loss > 1.0:
-        logger.info(f"apply weighted loss = {weighted_loss} on labels: {weighted_loss_label}")
+        logger.info(
+            f"apply weighted loss = {weighted_loss} on labels: {weighted_loss_label}"
+        )
 
     controlnet.train()
     unet.eval()
@@ -183,15 +209,22 @@ def main():
                 noise = torch.randn(noise_shape, dtype=inputs.dtype).to(device)
 
                 # use binary encoding to encode segmentation mask
-                controlnet_cond = binarize_labels(labels.as_tensor().to(torch.uint8)).float()
+                controlnet_cond = binarize_labels(
+                    labels.as_tensor().to(torch.uint8)
+                ).float()
 
                 # create timesteps
                 timesteps = torch.randint(
-                    0, noise_scheduler.num_train_timesteps, (inputs.shape[0],), device=device
+                    0,
+                    noise_scheduler.num_train_timesteps,
+                    (inputs.shape[0],),
+                    device=device,
                 ).long()
 
                 # create noisy latent
-                noisy_latent = noise_scheduler.add_noise(original_samples=inputs, noise=noise, timesteps=timesteps)
+                noisy_latent = noise_scheduler.add_noise(
+                    original_samples=inputs, noise=noise, timesteps=timesteps
+                )
 
                 # get controlnet output
                 down_block_res_samples, mid_block_res_sample = controlnet(
@@ -210,13 +243,20 @@ def main():
 
             if weighted_loss > 1.0:
                 weights = torch.ones_like(inputs).to(inputs.device)
-                roi = torch.zeros([noise_shape[0]] + [1] + noise_shape[2:]).to(inputs.device)
-                interpolate_label = F.interpolate(labels, size=inputs.shape[2:], mode="nearest")
+                roi = torch.zeros([noise_shape[0]] + [1] + noise_shape[2:]).to(
+                    inputs.device
+                )
+                interpolate_label = F.interpolate(
+                    labels, size=inputs.shape[2:], mode="nearest"
+                )
                 # assign larger weights for ROI (tumor)
                 for label in weighted_loss_label:
                     roi[interpolate_label == label] = 1
                 weights[roi.repeat(1, inputs.shape[1], 1, 1, 1) == 1] = weighted_loss
-                loss = (F.l1_loss(noise_pred.float(), noise.float(), reduction="none") * weights).mean()
+                loss = (
+                    F.l1_loss(noise_pred.float(), noise.float(), reduction="none")
+                    * weights
+                ).mean()
             else:
                 loss = F.l1_loss(noise_pred.float(), noise.float())
 
@@ -229,7 +269,9 @@ def main():
             if rank == 0:
                 # write train loss for each batch into tensorboard
                 tensorboard_writer.add_scalar(
-                    "train/train_controlnet_loss_iter", loss.detach().cpu().item(), total_step
+                    "train/train_controlnet_loss_iter",
+                    loss.detach().cpu().item(),
+                    total_step,
                 )
                 batches_done = step + 1
                 batches_left = len(train_loader) - batches_done
@@ -256,9 +298,15 @@ def main():
             dist.all_reduce(epoch_loss, op=torch.distributed.ReduceOp.AVG)
 
         if rank == 0:
-            tensorboard_writer.add_scalar("train/train_controlnet_loss_epoch", epoch_loss.cpu().item(), total_step)
+            tensorboard_writer.add_scalar(
+                "train/train_controlnet_loss_epoch", epoch_loss.cpu().item(), total_step
+            )
             # save controlnet only on master GPU (rank 0)
-            controlnet_state_dict = controlnet.module.state_dict() if world_size > 1 else controlnet.state_dict()
+            controlnet_state_dict = (
+                controlnet.module.state_dict()
+                if world_size > 1
+                else controlnet.state_dict()
+            )
             torch.save(
                 {
                     "epoch": epoch + 1,

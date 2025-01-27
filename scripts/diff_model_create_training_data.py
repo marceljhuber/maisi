@@ -53,7 +53,9 @@ def create_transforms(dim: tuple = None) -> Compose:
                 monai.transforms.ScaleIntensityRanged(
                     keys="image", a_min=-1000, a_max=1000, b_min=0, b_max=1, clip=True
                 ),
-                monai.transforms.Resized(keys="image", spatial_size=dim, mode="trilinear"),
+                monai.transforms.Resized(
+                    keys="image", spatial_size=dim, mode="trilinear"
+                ),
             ]
         )
     else:
@@ -77,7 +79,9 @@ def round_number(number: int, base_number: int = 128) -> int:
     Returns:
         int: Rounded number.
     """
-    new_number = max(round(float(number) / float(base_number)), 1.0) * float(base_number)
+    new_number = max(round(float(number) / float(base_number)), 1.0) * float(
+        base_number
+    )
     return int(new_number)
 
 
@@ -148,7 +152,9 @@ def process_file(
         logger.info(f"out_filename: {out_filename}")
 
         with torch.amp.autocast("cuda"):
-            pt_nda = torch.from_numpy(nda_image).float().to(device).unsqueeze(0).unsqueeze(0)
+            pt_nda = (
+                torch.from_numpy(nda_image).float().to(device).unsqueeze(0).unsqueeze(0)
+            )
             z = autoencoder.encode_stage_2_inputs(pt_nda)
             logger.info(f"z: {z.size()}, {z.dtype}")
 
@@ -178,7 +184,9 @@ def diff_model_create_training_data(
 
     autoencoder = define_instance(args, "autoencoder_def").to(device)
     try:
-        checkpoint_autoencoder = torch.load(args.trained_autoencoder_path, weights_only=True)
+        checkpoint_autoencoder = torch.load(
+            args.trained_autoencoder_path, weights_only=True
+        )
         autoencoder.load_state_dict(checkpoint_autoencoder)
     except Exception:
         logger.error("The trained_autoencoder_path does not exist!")
@@ -197,36 +205,60 @@ def diff_model_create_training_data(
         filepath = filenames_raw[_iter]
         new_dim = tuple(
             round_number(
-                int(plain_transforms({"image": os.path.join(args.data_base_dir, filepath)})["image"].meta["dim"][_i])
+                int(
+                    plain_transforms(
+                        {"image": os.path.join(args.data_base_dir, filepath)}
+                    )["image"].meta["dim"][_i]
+                )
             )
             for _i in range(1, 4)
         )
         new_transforms = create_transforms(new_dim)
 
-        process_file(filepath, args, autoencoder, device, plain_transforms, new_transforms, logger)
+        process_file(
+            filepath,
+            args,
+            autoencoder,
+            device,
+            plain_transforms,
+            new_transforms,
+            logger,
+        )
 
     if dist.is_initialized():
         dist.destroy_process_group()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Diffusion Model Training Data Creation")
+    parser = argparse.ArgumentParser(
+        description="Diffusion Model Training Data Creation"
+    )
     parser.add_argument(
         "--env_config",
         type=str,
-        default="./configs/environment_maisi_diff_model_train.json",
+        default="./configs_old/environment_maisi_diff_model_train.json",
         help="Path to environment configuration file",
     )
     parser.add_argument(
         "--model_config",
         type=str,
-        default="./configs/config_maisi_diff_model_train.json",
+        default="./configs_old/config_maisi_diff_model_train.json",
         help="Path to model training/inference configuration",
     )
     parser.add_argument(
-        "--model_def", type=str, default="./configs/config_maisi.json", help="Path to model definition file"
+        "--model_def",
+        type=str,
+        default="./configs_old/config_maisi.json",
+        help="Path to model definition file",
     )
-    parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs to use for distributed training")
+    parser.add_argument(
+        "--num_gpus",
+        type=int,
+        default=1,
+        help="Number of GPUs to use for distributed training",
+    )
 
     args = parser.parse_args()
-    diff_model_create_training_data(args.env_config, args.model_config, args.model_def, args.num_gpus)
+    diff_model_create_training_data(
+        args.env_config, args.model_config, args.model_def, args.num_gpus
+    )

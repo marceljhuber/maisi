@@ -33,22 +33,24 @@ def main():
     parser.add_argument(
         "-e",
         "--environment-file",
-        default="./configs/environment_maisi_controlnet_train.json",
+        default="./configs_old/environment_maisi_controlnet_train.json",
         help="environment json file that stores environment path",
     )
     parser.add_argument(
         "-c",
         "--config-file",
-        default="./configs/config_maisi.json",
+        default="./configs_old/config_maisi.json",
         help="config json file that stores network hyper-parameters",
     )
     parser.add_argument(
         "-t",
         "--training-config",
-        default="./configs/config_maisi_controlnet_train.json",
+        default="./configs_old/config_maisi_controlnet_train.json",
         help="config json file that stores training hyper-parameters",
     )
-    parser.add_argument("-g", "--gpus", default=1, type=int, help="number of gpus per node")
+    parser.add_argument(
+        "-g", "--gpus", default=1, type=int, help="number of gpus per node"
+    )
     args = parser.parse_args()
 
     # Step 0: configuration
@@ -103,7 +105,9 @@ def main():
             raise ValueError("Please download the autoencoder checkpoint.")
         autoencoder_ckpt = torch.load(args.trained_autoencoder_path)
         autoencoder.load_state_dict(autoencoder_ckpt)
-        logger.info(f"Load trained diffusion model from {args.trained_autoencoder_path}.")
+        logger.info(
+            f"Load trained diffusion model from {args.trained_autoencoder_path}."
+        )
     else:
         logger.info("trained autoencoder model is not loaded.")
 
@@ -113,7 +117,9 @@ def main():
     if args.trained_diffusion_path is not None:
         if not os.path.exists(args.trained_diffusion_path):
             raise ValueError("Please download the trained diffusion unet checkpoint.")
-        diffusion_model_ckpt = torch.load(args.trained_diffusion_path, map_location=device)
+        diffusion_model_ckpt = torch.load(
+            args.trained_diffusion_path, map_location=device
+        )
         unet.load_state_dict(diffusion_model_ckpt["unet_state_dict"])
         # load scale factor from diffusion model checkpoint
         scale_factor = diffusion_model_ckpt["scale_factor"]
@@ -133,9 +139,13 @@ def main():
         if not os.path.exists(args.trained_controlnet_path):
             raise ValueError("Please download the trained ControlNet checkpoint.")
         controlnet.load_state_dict(
-            torch.load(args.trained_controlnet_path, map_location=device)["controlnet_state_dict"]
+            torch.load(args.trained_controlnet_path, map_location=device)[
+                "controlnet_state_dict"
+            ]
         )
-        logger.info(f"load trained controlnet model from {args.trained_controlnet_path}")
+        logger.info(
+            f"load trained controlnet model from {args.trained_controlnet_path}"
+        )
     else:
         logger.info("trained controlnet is not loaded.")
 
@@ -157,7 +167,12 @@ def main():
         # get target dimension
         dim = batch["dim"]
         output_size = (dim[0].item(), dim[1].item(), dim[2].item())
-        latent_shape = (args.latent_channels, output_size[0] // 4, output_size[1] // 4, output_size[2] // 4)
+        latent_shape = (
+            args.latent_channels,
+            output_size[0] // 4,
+            output_size[1] // 4,
+            output_size[2] // 4,
+        )
         # check if output_size and out_spacing are valid.
         check_input(None, None, None, output_size, out_spacing, None)
         # generate a single synthetic image using a latent diffusion model with controlnet.
@@ -177,7 +192,9 @@ def main():
             noise_factor=1.0,
             num_inference_steps=args.controlnet_infer["num_inference_steps"],
             # reduce it when GPU memory is limited
-            autoencoder_sliding_window_infer_size=args.controlnet_infer["autoencoder_sliding_window_infer_size"],
+            autoencoder_sliding_window_infer_size=args.controlnet_infer[
+                "autoencoder_sliding_window_infer_size"
+            ],
         )
         # save image/label pairs
         labels = decollate_batch(batch)[0]["label"]

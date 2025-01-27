@@ -60,19 +60,19 @@ We retrained several state-of-the-art diffusion model-based methods using our da
 ### Inference Time Cost and GPU Memory Usage
 | `output_size` | latent size |`autoencoder_sliding_window_infer_size` | `autoencoder_tp_num_splits` | Peak Memory | DM Time | VAE Time |
 |---------------|:--------------------------------------:|:--------------------------------------:|:---------------------------:|:-----------:|:-------:|:--------:|
-| [256x256x128](./configs/config_infer_16g_256x256x128.json)   |4x64x64x32| >=[64,64,32], not used                 | 2                           | 14G         | 57s     | 1s       |
-| [256x256x256](./configs/config_infer_16g_256x256x256.json)   |4x64x64x64| [48,48,64], 4 patches                  | 2                           | 14G         | 81s     | 7s       |
-| [512x512x128](./configs/config_infer_16g_512x512x128.json)   |4x128x128x32| [64,64,32], 9 patches                  | 1                           | 14G         | 138s    | 7s       |
+| [256x256x128](backup/configs_old/config_infer_16g_256x256x128.json)   |4x64x64x32| >=[64,64,32], not used                 | 2                           | 14G         | 57s     | 1s       |
+| [256x256x256](backup/configs_old/config_infer_16g_256x256x256.json)   |4x64x64x64| [48,48,64], 4 patches                  | 2                           | 14G         | 81s     | 7s       |
+| [512x512x128](backup/configs_old/config_infer_16g_512x512x128.json)   |4x128x128x32| [64,64,32], 9 patches                  | 1                           | 14G         | 138s    | 7s       |
 |               |                                        |                             |             |         |          |
-| [256x256x256](./configs/config_infer_24g_256x256x256.json)   |4x64x64x64| >=[64,64,64], not used                 | 4                           | 22G         | 81s     | 2s       |
-| [512x512x128](./configs/config_infer_24g_512x512x128.json)   |4x128x128x32| [80,80,32], 4 patches                  | 1                           | 18G         | 138s    | 9s       |
-| [512x512x512](./configs/config_infer_24g_512x512x512.json)   |4x128x128x128| [64,64,48], 36 patches                 | 2                           | 22G         | 569s    | 29s      |
+| [256x256x256](backup/configs_old/config_infer_24g_256x256x256.json)   |4x64x64x64| >=[64,64,64], not used                 | 4                           | 22G         | 81s     | 2s       |
+| [512x512x128](backup/configs_old/config_infer_24g_512x512x128.json)   |4x128x128x32| [80,80,32], 4 patches                  | 1                           | 18G         | 138s    | 9s       |
+| [512x512x512](backup/configs_old/config_infer_24g_512x512x512.json)   |4x128x128x128| [64,64,48], 36 patches                 | 2                           | 22G         | 569s    | 29s      |
 |               |                                        |                             |             |         |          |
-| [512x512x512](./configs/config_infer_32g_512x512x512.json)   |4x128x128x128| [64,64,64], 27 patches                 | 2                           | 26G         | 569s    | 40s      |
+| [512x512x512](backup/configs_old/config_infer_32g_512x512x512.json)   |4x128x128x128| [64,64,64], 27 patches                 | 2                           | 26G         | 569s    | 40s      |
 |               |                                        |                             |             |         |          |
-| [512x512x128](./configs/config_infer_80g_512x512x128.json)   |4x128x128x32| >=[128,128,32], not used               | 4                           | 37G         | 138s    | 140s     |
-| [512x512x512](./configs/config_infer_80g_512x512x512.json)   |4x128x128x128| [80,80,80], 8 patches                  | 2                           | 44G         | 569s    | 30s      |
-| [512x512x768](./configs/config_infer_24g_512x512x768.json)   |4x128x128x192| [80,80,112], 8 patches                 | 4                           | 55G         | 904s    | 48s      |
+| [512x512x128](backup/configs_old/config_infer_80g_512x512x128.json)   |4x128x128x32| >=[128,128,32], not used               | 4                           | 37G         | 138s    | 140s     |
+| [512x512x512](backup/configs_old/config_infer_80g_512x512x512.json)   |4x128x128x128| [80,80,80], 8 patches                  | 2                           | 44G         | 569s    | 30s      |
+| [512x512x768](backup/configs_old/config_infer_24g_512x512x768.json)   |4x128x128x192| [80,80,112], 8 patches                 | 4                           | 55G         | 904s    | 48s      |
 
 **Table 3:** Inference Time Cost and GPU Memory Usage. `DM Time` refers to the time required for diffusion model inference. `VAE Time` refers to the time required for VAE decoder inference. The total inference time is the sum of `DM Time` and `VAE Time`. The experiment was conducted on an A100 80G GPU.
 
@@ -121,11 +121,11 @@ MAISI is based on the following papers:
 [**ControlNet:**  Lvmin Zhang, Anyi Rao, Maneesh Agrawala; “Adding Conditional Control to Text-to-Image Diffusion Models.” ICCV 2023.](https://openaccess.thecvf.com/content/ICCV2023/papers/Zhang_Adding_Conditional_Control_to_Text-to-Image_Diffusion_Models_ICCV_2023_paper.pdf)
 
 ### 1. Network Definition
-Network definition is stored in [./configs/config_maisi.json](./configs/config_maisi.json). Training and inference should use the same [./configs/config_maisi.json](./configs/config_maisi.json).
+Network definition is stored in [./configs/config_maisi.json](backup/configs_old/config_maisi.json). Training and inference should use the same [./configs/config_maisi.json](backup/configs_old/config_maisi.json).
 
 ### 2. Model Inference
 #### Inference parameters:
-The information for the inference input, such as the body region and anatomy to generate, is stored in [./configs/config_infer.json](./configs/config_infer.json). Feel free to experiment with it. Below are the details of the parameters:
+The information for the inference input, such as the body region and anatomy to generate, is stored in [./configs/config_infer.json](backup/configs_old/config_infer.json). Feel free to experiment with it. Below are the details of the parameters:
 
 - `"num_output_samples"`: An integer specifying the number of output image/mask pairs to generate.
 - `"spacing"`: The voxel size of the generated images. For example, if set to `[1.5, 1.5, 2.0]`, it generates images with a resolution of 1.5x1.5x2.0 mm.
@@ -167,19 +167,19 @@ For example,
 To run the inference script, please run:
 ```bash
 export MONAI_DATA_DIRECTORY=<dir_you_will_download_data>
-python -m scripts.inference -c ./configs/config_maisi.json -i ./configs/config_infer.json -e ./configs/environment.json --random-seed 0
+python -m scripts.inference -c ./configs_old/config_maisi.json -i ./configs_old/config_infer.json -e ./configs_old/environment.json --random-seed 0
 ```
 
 Please refer to [maisi_inference_tutorial.ipynb](maisi_inference_tutorial.ipynb) for the tutorial for MAISI model inference.
 
 #### Quality Check:
-We have implemented a quality check function for the generated CT images. The main idea behind this function is to ensure that the Hounsfield units (HU) intensity for each organ in the CT images remains within a defined range. For each training image used in the Diffusion network, we computed the median value for a few major organs. Then we summarize the statistics of these median values and save it to [./configs/image_median_statistics.json](./configs/image_median_statistics.json). During inference, for each generated image, we compute the median HU values for the major organs and check whether they fall within the normal range.
+We have implemented a quality check function for the generated CT images. The main idea behind this function is to ensure that the Hounsfield units (HU) intensity for each organ in the CT images remains within a defined range. For each training image used in the Diffusion network, we computed the median value for a few major organs. Then we summarize the statistics of these median values and save it to [./configs/image_median_statistics.json](backup/configs_old/image_median_statistics.json). During inference, for each generated image, we compute the median HU values for the major organs and check whether they fall within the normal range.
 
 ### 3. Model Training
-Training data preparation can be found in [./data/README.md](./data/README.md)
+Training data preparation can be found in [./data/README.md](backup/data/README.md)
 
 #### [3.1 3D Autoencoder Training](./maisi_train_vae_tutorial.ipynb)
-The information for the training hyperparameters and data processing parameters, like learning rate and patch size, are stored in [./configs/config_maisi_vae_train.json](./configs/config_maisi_vae_train.json). The provided configuration works for 16G V100 GPU. Please feel free to tune the parameters for your datasets and device.
+The information for the training hyperparameters and data processing parameters, like learning rate and patch size, are stored in [./configs/config_maisi_vae_train.json](backup/configs_old/config_maisi_vae_train.json). The provided configuration works for 16G V100 GPU. Please feel free to tune the parameters for your datasets and device.
 
 Dataset preprocessing:
 - `"random_aug"`: bool, whether to add random data augmentation for training data.
@@ -209,10 +209,10 @@ Please refer to [maisi_diff_unet_training_tutorial.ipynb](maisi_diff_unet_traini
 
 #### [3.3 3D ControlNet Training](./scripts/train_controlnet.py)
 
-We provide a [training config](./configs/config_maisi_controlnet_train.json) executing finetuning for pretrained ControlNet with a new class (i.e., Kidney Tumor).
+We provide a [training config](backup/configs_old/config_maisi_controlnet_train.json) executing finetuning for pretrained ControlNet with a new class (i.e., Kidney Tumor).
 When finetuning with other new class names, please update the `weighted_loss_label` in training config
-and [label_dict.json](./configs/label_dict.json) accordingly. There are 8 dummy labels as deletable placeholders in default `label_dict.json` that can be used for finetuning. Users may apply any placeholder labels for fine-tuning purpose. If there are more than 8 new labels needed in finetuning, users can freely define numeric label indices less than 256. The current ControlNet implementation can support up to 256 labels (0~255).
-Preprocessed dataset for ControlNet training and more details anout data preparation can be found in the [README](./data/README.md).
+and [label_dict.json](backup/configs_old/label_dict.json) accordingly. There are 8 dummy labels as deletable placeholders in default `label_dict.json` that can be used for finetuning. Users may apply any placeholder labels for fine-tuning purpose. If there are more than 8 new labels needed in finetuning, users can freely define numeric label indices less than 256. The current ControlNet implementation can support up to 256 labels (0~255).
+Preprocessed dataset for ControlNet training and more details anout data preparation can be found in the [README](backup/data/README.md).
 
 #### Training Configuration
 The training was performed with the following:
@@ -223,7 +223,7 @@ The training was performed with the following:
 #### Execute Training:
 To train with a single GPU, please run:
 ```bash
-python -m scripts.train_controlnet -c ./configs/config_maisi.json -t ./configs/config_maisi_controlnet_train.json -e ./configs/environment_maisi_controlnet_train.json -g 1
+python -m scripts.train_controlnet -c ./configs_old/config_maisi.json -t ./configs_old/config_maisi_controlnet_train.json -e ./configs_old/environment_maisi_controlnet_train.json -g 1
 ```
 
 The training script also enables multi-GPU training. For instance, if you are using eight GPUs, you can run the training script with the following command:
@@ -233,7 +233,7 @@ torchrun \
     --nproc_per_node=${NUM_GPUS_PER_NODE} \
     --nnodes=1 \
     --master_addr=localhost --master_port=1234 \
-    -m scripts.train_controlnet -c ./configs/config_maisi.json -t ./configs/config_maisi_controlnet_train.json -e ./configs/environment_maisi_controlnet_train.json -g ${NUM_GPUS_PER_NODE}
+    -m scripts.train_controlnet -c ./configs_old/config_maisi.json -t ./configs_old/config_maisi_controlnet_train.json -e ./configs_old/environment_maisi_controlnet_train.json -g ${NUM_GPUS_PER_NODE}
 ```
 Please also check [maisi_train_controlnet_tutorial.ipynb](./maisi_train_controlnet_tutorial.ipynb) for more details about data preparation and training parameters.
 

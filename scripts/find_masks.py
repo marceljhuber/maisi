@@ -58,7 +58,7 @@ def find_masks(
     spacing: Sequence[float] | float = 1.0,
     output_size: Sequence[int] = [512, 512, 512],
     check_spacing_and_output_size: bool = False,
-    database_filepath: str = "./configs/database.json",
+    database_filepath: str = "./configs_old/database.json",
     mask_foldername: str = "./datasets/masks/",
 ):
     """
@@ -90,14 +90,22 @@ def find_masks(
         zip_file_path = mask_foldername + ".zip"
 
         if not os.path.isfile(zip_file_path):
-            raise ValueError(f"Please download {zip_file_path} following the instruction in ./datasets/README.md.")
+            raise ValueError(
+                f"Please download {zip_file_path} following the instruction in ./datasets/README.md."
+            )
 
         print(f"Extracting {zip_file_path} to {os.path.dirname(zip_file_path)}")
-        extractall(filepath=zip_file_path, output_dir=os.path.dirname(zip_file_path), file_type="zip")
+        extractall(
+            filepath=zip_file_path,
+            output_dir=os.path.dirname(zip_file_path),
+            file_type="zip",
+        )
         print(f"Unzipped {zip_file_path} to {mask_foldername}.")
 
     if not os.path.isfile(database_filepath):
-        raise ValueError(f"Please download {database_filepath} following the instruction in ./datasets/README.md.")
+        raise ValueError(
+            f"Please download {database_filepath} following the instruction in ./datasets/README.md."
+        )
     with open(database_filepath, "r") as f:
         db = json.load(f)
 
@@ -108,9 +116,17 @@ def find_masks(
             continue
 
         # extract region indice (top_index and bottom_index) for candidate mask
-        top_index = [index for index, element in enumerate(_item["top_region_index"]) if element != 0]
+        top_index = [
+            index
+            for index, element in enumerate(_item["top_region_index"])
+            if element != 0
+        ]
         top_index = top_index[0]
-        bottom_index = [index for index, element in enumerate(_item["bottom_region_index"]) if element != 0]
+        bottom_index = [
+            index
+            for index, element in enumerate(_item["bottom_region_index"])
+            if element != 0
+        ]
         bottom_index = bottom_index[0]
 
         # whether to keep this mask, default to be True.
@@ -129,13 +145,18 @@ def find_masks(
         if check_spacing_and_output_size:
             # if the output_size and spacing are different with user's input, skip it
             for axis in range(3):
-                if _item["dim"][axis] != output_size[axis] or _item["spacing"][axis] != spacing[axis]:
+                if (
+                    _item["dim"][axis] != output_size[axis]
+                    or _item["spacing"][axis] != spacing[axis]
+                ):
                     keep_mask = False
 
         if keep_mask:
             # if decide to keep this mask, we pack the information of this mask and add to final output.
             candidate = {
-                "pseudo_label": os.path.join(mask_foldername, _item["pseudo_label_filename"]),
+                "pseudo_label": os.path.join(
+                    mask_foldername, _item["pseudo_label_filename"]
+                ),
                 "spacing": _item["spacing"],
                 "dim": _item["dim"],
                 "top_region_index": _item["top_region_index"],
@@ -144,7 +165,9 @@ def find_masks(
 
             # Conditionally add the label to the candidate dictionary
             if "label_filename" in _item:
-                candidate["label"] = os.path.join(mask_foldername, _item["label_filename"])
+                candidate["label"] = os.path.join(
+                    mask_foldername, _item["label_filename"]
+                )
 
             candidate_masks.append(candidate)
 

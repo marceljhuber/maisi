@@ -27,7 +27,12 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 from scripts.utils import KL_loss, dynamic_infer
-from scripts.utils_plot import find_label_center_loc, get_xyz_plot, show_image, visualize_2d
+from scripts.utils_plot import (
+    find_label_center_loc,
+    get_xyz_plot,
+    show_image,
+    visualize_2d,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -38,7 +43,7 @@ print_config()
 ###################################################################################################
 # RANDOM SEEDS
 ###################################################################################################
-seed = 42 
+seed = 42
 torch.manual_seed(seed)
 torch.cuda.manual_seed(seed)  # CUDA
 torch.cuda.manual_seed_all(seed)  # multiple GPUs
@@ -54,10 +59,10 @@ torch.backends.cudnn.benchmark = False
 ###################################################################################################
 def list_image_files(directory_path):
     # Define common image file extensions
-    image_extensions = ('.jpg', '.jpeg', '.png')
+    image_extensions = (".jpg", ".jpeg", ".png")
 
     # Use glob to find all files in directory and subdirectories
-    files = glob.glob(os.path.join(directory_path, '**', '*.*'), recursive=True)
+    files = glob.glob(os.path.join(directory_path, "**", "*.*"), recursive=True)
 
     # Filter files for image extensions
     image_files = [file for file in files if file.lower().endswith(image_extensions)]
@@ -72,17 +77,17 @@ directory_path = "/optima/exchange/mhuber/KermanyV3_resized/train"
 image_files = list_image_files(directory_path)
 
 
-def split_train_val_by_patient(image_names, train_ratio=0.8):
+def split_train_val_by_patient(image_names, train_ratio=0.9):
     # Extract unique patient IDs
-    patient_ids = set(name.split('-')[1] for name in image_names)
+    patient_ids = set(name.split("-")[1] for name in image_names)
 
     # Random split of patient IDs
     num_train = int(len(patient_ids) * train_ratio)
     train_patients = set(random.sample(list(patient_ids), num_train))
 
     # Split images based on patient IDs
-    train_images = [img for img in image_names if img.split('-')[1] in train_patients]
-    val_images = [img for img in image_names if img.split('-')[1] not in train_patients]
+    train_images = [img for img in image_names if img.split("-")[1] in train_patients]
+    val_images = [img for img in image_names if img.split("-")[1] not in train_patients]
 
     return train_images, val_images
 
@@ -92,7 +97,9 @@ train_imgs, val_imgs = split_train_val_by_patient(image_files)
 # Print the image file paths
 if image_files:
     print(f"Found {len(image_files)} image(s)")
-    print(f"Split into {len(train_imgs)} train images and {len(val_imgs)} valid images.")
+    print(
+        f"Split into {len(train_imgs)} train images and {len(val_imgs)} valid images."
+    )
 else:
     print("No image files found.")
 ###################################################################################################
@@ -102,26 +109,26 @@ else:
 # GENERAL CONFIG
 ###################################################################################################
 config = {
-    'latent_dim': 128,
-    'channels': (32, 64, 128, 256),  # Encoder/Decoder channels
-    'strides': (2, 2, 2, 2),  # Encoder/Decoder strides
-    'disc_channels': 64,  # Base channels for discriminator
-    'disc_layers': 3,  # Number of layers in discriminator
-    'batch_size': 32,
-    'learning_rate': 1e-4,
-    'epochs': 100,
-    'num_workers': 4,
-    'kl_weight': 0.001,  # Weight for KL divergence loss
-    'perceptual_weight': 0.1,  # Weight for perceptual loss
-    'adv_weight': 0.01,  # Weight for adversarial loss
-    'log_interval': 10,  # Steps between logging
-    'save_interval': 5,  # Epochs between saving checkpoints
-    'amp': True,  # Use Automatic Mixed Precision
-    'train_images': train_imgs,  # List of training image paths
-    'val_images': val_imgs,  # List of validation image paths
+    "latent_dim": 128,
+    "channels": (32, 64, 128, 256),  # Encoder/Decoder channels
+    "strides": (2, 2, 2, 2),  # Encoder/Decoder strides
+    "disc_channels": 64,  # Base channels for discriminator
+    "disc_layers": 3,  # Number of layers in discriminator
+    "batch_size": 32,
+    "learning_rate": 1e-4,
+    "epochs": 100,
+    "num_workers": 4,
+    "kl_weight": 0.001,  # Weight for KL divergence loss
+    "perceptual_weight": 0.1,  # Weight for perceptual loss
+    "adv_weight": 0.01,  # Weight for adversarial loss
+    "log_interval": 10,  # Steps between logging
+    "save_interval": 5,  # Epochs between saving checkpoints
+    "amp": True,  # Use Automatic Mixed Precision
+    "train_images": train_imgs,  # List of training image paths
+    "val_images": val_imgs,  # List of validation image paths
     #    'dataset': GrayscaleDataset,
     #    'transform': train_transform_2,
-    'JOBNAME': 'VAEGAN_BASE',
+    "JOBNAME": "VAEGAN_AUG",
 }
 ###################################################################################################
 
@@ -131,7 +138,7 @@ config = {
 ###################################################################################################
 args = argparse.Namespace()
 
-environment_file = "./configs/environment_maisi_vae_train.json"
+environment_file = "configs_old/environment_maisi_vae_train.json"
 env_dict = json.load(open(environment_file, "r"))
 for k, v in env_dict.items():
     setattr(args, k, v)
@@ -162,13 +169,13 @@ print(f"Tensorboard event will be saved as {tensorboard_path}.\n")
 ###################################################################################################
 # READ CONFIGS
 ###################################################################################################
-config_file = "./configs/config_maisi.json"
+config_file = "configs_old/config_maisi.json"
 config_dict = json.load(open(config_file, "r"))
 for k, v in config_dict.items():
     setattr(args, k, v)
 
 # check the format of inference inputs
-config_train_file = "./configs/config_maisi_vae_train.json"
+config_train_file = "configs_old/config_maisi_vae_train.json"
 config_train_dict = json.load(open(config_train_file, "r"))
 for k, v in config_train_dict["data_option"].items():
     setattr(args, k, v)
@@ -202,7 +209,7 @@ autoencoder = AutoencoderKlMaisi(
     use_convtranspose=False,
     norm_float16=True,
     num_splits=1,  # 1 from the maisi notebook
-    dim_split=1
+    dim_split=1,
 ).to(device)
 ###################################################################################################
 
@@ -239,12 +246,12 @@ class GrayscaleDataset(Dataset):
 
     def __getitem__(self, idx):
         image_path = self.image_paths[idx]
-        image = Image.open(image_path).convert('L')
+        image = Image.open(image_path).convert("L")
 
         if self.transform:
             image = self.transform(image)
 
-        return {'image': image}
+        return {"image": image}
 
 
 class PreloadedGrayscaleDataset(Dataset):
@@ -253,7 +260,7 @@ class PreloadedGrayscaleDataset(Dataset):
         self.images = []
 
         for path in tqdm(image_paths, desc="Loading images"):
-            img = Image.open(path).convert('L')
+            img = Image.open(path).convert("L")
             if transform:
                 img = transform(img)
             self.images.append(img)
@@ -262,7 +269,7 @@ class PreloadedGrayscaleDataset(Dataset):
         return len(self.images)
 
     def __getitem__(self, idx):
-        return {'image': self.images[idx]}
+        return {"image": self.images[idx]}
 
 
 ###################################################################################################
@@ -281,12 +288,20 @@ else:
 loss_adv = PatchAdversarialLoss(criterion="least_squares")
 
 loss_perceptual = (
-    PerceptualLoss(spatial_dims=2, network_type="squeeze", is_fake_3d=True, fake_3d_ratio=0.2).eval().to(device)
+    PerceptualLoss(
+        spatial_dims=2, network_type="squeeze", is_fake_3d=True, fake_3d_ratio=0.2
+    )
+    .eval()
+    .to(device)
 )
 
 # config optimizer and lr scheduler
-optimizer_g = torch.optim.Adam(params=autoencoder.parameters(), lr=args.lr, eps=1e-06 if args.amp else 1e-08)
-optimizer_d = torch.optim.Adam(params=discriminator.parameters(), lr=args.lr, eps=1e-06 if args.amp else 1e-08)
+optimizer_g = torch.optim.Adam(
+    params=autoencoder.parameters(), lr=args.lr, eps=1e-06 if args.amp else 1e-08
+)
+optimizer_d = torch.optim.Adam(
+    params=discriminator.parameters(), lr=args.lr, eps=1e-06 if args.amp else 1e-08
+)
 
 
 # please adjust the learning rate warmup rule based on your dataset and n_epochs
@@ -306,27 +321,14 @@ scheduler_d = lr_scheduler.LambdaLR(optimizer_d, lr_lambda=warmup_rule)
 # set AMP scaler
 if args.amp:
     # test use mean reduction for everything
-    scaler_g = GradScaler(init_scale=2.0 ** 8, growth_factor=1.5)
-    scaler_d = GradScaler(init_scale=2.0 ** 8, growth_factor=1.5)
+    scaler_g = GradScaler(init_scale=2.0**8, growth_factor=1.5)
+    scaler_d = GradScaler(init_scale=2.0**8, growth_factor=1.5)
 ###################################################################################################
 
 
 ###################################################################################################
 # TRAINING SETUP
 ###################################################################################################
-# Setup transforms
-train_transform_1 = transforms.Compose([
-    transforms.Resize((256, 256)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5], std=[0.5])
-])
-val_transform = transforms.Compose([
-    transforms.Resize((256, 256)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5], std=[0.5])
-])
-
-
 class SpeckleNoise:
     def __init__(self, noise_std=0.1):
         self.noise_std = noise_std
@@ -336,40 +338,44 @@ class SpeckleNoise:
         return img * (1 + noise)
 
 
-train_transform_2 = transforms.Compose([
-    transforms.RandomResizedCrop(256, scale=(0.8, 1.0)),
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomRotation(10),
-    transforms.ColorJitter(brightness=0.2, contrast=0.2),
-    transforms.RandomSolarize(threshold=192.0, p=0.2),
-    transforms.ToTensor(),
-    SpeckleNoise(0.1)
-])
+# Setup transforms
+train_transform_aug_zscore = transforms.Compose(
+    [
+        transforms.RandomResizedCrop(256, scale=(0.8, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(10),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),
+        transforms.ToTensor(),
+        SpeckleNoise(0.1),
+        transforms.Normalize(mean=[0.2100], std=[0.0300]),
+    ]
+)
+val_transform = transforms.Compose(
+    [
+        transforms.Resize((256, 256)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.2100], std=[0.0300]),
+    ]
+)
 
-config['transform'] = train_transform_1
-config['dataset'] = PreloadedGrayscaleDataset
+config["transform"] = train_transform_aug_zscore
+config["dataset"] = GrayscaleDataset
 
 # Create datasets and dataloaders
-dataset_train = config['dataset'](
-    config['train_images'],
-    transform=config['transform']
-)
-dataset_val = config['dataset'](
-    config['val_images'],
-    transform=val_transform
-)
+dataset_train = config["dataset"](config["train_images"], transform=config["transform"])
+dataset_val = config["dataset"](config["val_images"], transform=val_transform)
 
 dataloader_train = DataLoader(
     dataset_train,
-    batch_size=config['batch_size'],
+    batch_size=config["batch_size"],
     shuffle=True,
-    num_workers=config['num_workers']
+    num_workers=config["num_workers"],
 )
 dataloader_val = DataLoader(
     dataset_val,
-    batch_size=config['batch_size'],
+    batch_size=config["batch_size"],
     shuffle=True,
-    num_workers=config['num_workers']
+    num_workers=config["num_workers"],
 )
 ###################################################################################################
 
@@ -391,7 +397,7 @@ val_inferer = (
         sw_batch_size=1,
         progress=False,
         overlap=0.0,
-        device=torch.device("cpu"),
+        device=device,  # changed to gpu from cpu
         sw_device=device,
     )
     if args.val_sliding_window_patch_size
@@ -400,7 +406,11 @@ val_inferer = (
 
 
 def loss_weighted_sum(losses):
-    return losses["recons_loss"] + args.kl_weight * losses["kl_loss"] + args.perceptual_weight * losses["p_loss"]
+    return (
+        losses["recons_loss"]
+        + args.kl_weight * losses["kl_loss"]
+        + args.perceptual_weight * losses["p_loss"]
+    )
 
 
 # Training and validation loops
@@ -423,7 +433,9 @@ for epoch in range(start_epoch, max_epochs):
                 "p_loss": loss_perceptual(reconstruction.float(), images.float()),
             }
             logits_fake = discriminator(reconstruction.contiguous().float())[-1]
-            generator_loss = loss_adv(logits_fake, target_is_real=True, for_discriminator=False)
+            generator_loss = loss_adv(
+                logits_fake, target_is_real=True, for_discriminator=False
+            )
             loss_g = loss_weighted_sum(losses) + args.adv_weight * generator_loss
 
             if args.amp:
@@ -437,9 +449,13 @@ for epoch in range(start_epoch, max_epochs):
 
             # Train Discriminator
             logits_fake = discriminator(reconstruction.contiguous().detach())[-1]
-            loss_d_fake = loss_adv(logits_fake, target_is_real=False, for_discriminator=True)
+            loss_d_fake = loss_adv(
+                logits_fake, target_is_real=False, for_discriminator=True
+            )
             logits_real = discriminator(images.contiguous().detach())[-1]
-            loss_d_real = loss_adv(logits_real, target_is_real=True, for_discriminator=True)
+            loss_d_real = loss_adv(
+                logits_real, target_is_real=True, for_discriminator=True
+            )
             loss_d = (loss_d_fake + loss_d_real) * 0.5
 
             if args.amp:
@@ -453,7 +469,9 @@ for epoch in range(start_epoch, max_epochs):
         # Log training loss
         total_step += 1
         for loss_name, loss_value in losses.items():
-            tensorboard_writer.add_scalar(f"train_{loss_name}_iter", loss_value.item(), total_step)
+            tensorboard_writer.add_scalar(
+                f"train_{loss_name}_iter", loss_value.item(), total_step
+            )
             train_epoch_losses[loss_name] += loss_value.item()
         tensorboard_writer.add_scalar("train_adv_loss_iter", generator_loss, total_step)
         tensorboard_writer.add_scalar("train_fake_loss_iter", loss_d_fake, total_step)
@@ -464,7 +482,9 @@ for epoch in range(start_epoch, max_epochs):
     for key in train_epoch_losses:
         train_epoch_losses[key] /= len(dataloader_train)
     formatted_losses = {k: f"{v:.6f}" for k, v in train_epoch_losses.items()}
-    print(f"Epoch {epoch} train_vae_loss {loss_weighted_sum(train_epoch_losses):.6f}: {formatted_losses}.")
+    print(
+        f"Epoch {epoch} train_vae_loss {loss_weighted_sum(train_epoch_losses):.6f}: {formatted_losses}."
+    )
     for loss_name, loss_value in train_epoch_losses.items():
         tensorboard_writer.add_scalar(f"train_{loss_name}_epoch", loss_value, epoch)
     torch.save(autoencoder.state_dict(), trained_g_path)
@@ -478,12 +498,17 @@ for epoch in range(start_epoch, max_epochs):
         for batch in dataloader_val:
             with torch.no_grad():
                 with autocast(enabled=args.amp):
-                    images = batch["image"]
-                    reconstruction, _, _ = dynamic_infer(val_inferer, autoencoder, images)
-                    reconstruction = reconstruction.to(device)
-                    val_epoch_losses["recons_loss"] += loss_intensity(reconstruction, images.to(device)).item()
+                    images = batch["image"].to(device)  # Move to device here
+                    reconstruction, _, _ = dynamic_infer(
+                        val_inferer, autoencoder, images
+                    )
+                    val_epoch_losses["recons_loss"] += loss_intensity(
+                        reconstruction, images.to(device)
+                    ).item()
                     val_epoch_losses["kl_loss"] += KL_loss(z_mu, z_sigma).item()
-                    val_epoch_losses["p_loss"] += loss_perceptual(reconstruction, images.to(device)).item()
+                    val_epoch_losses["p_loss"] += loss_perceptual(
+                        reconstruction, images.to(device)
+                    ).item()
 
         for key in val_epoch_losses:
             val_epoch_losses[key] /= len(dataloader_val)
@@ -504,21 +529,28 @@ for epoch in range(start_epoch, max_epochs):
 
         # Monitor reconstruction
         scale_factor_sample = 1.0 / z_mu.flatten().std()
-        tensorboard_writer.add_scalar("val_one_sample_scale_factor", scale_factor_sample, epoch)
+        tensorboard_writer.add_scalar(
+            "val_one_sample_scale_factor", scale_factor_sample, epoch
+        )
 
         vis_image = visualize_2d(images)
         vis_recon = visualize_2d(reconstruction)
 
-        tensorboard_writer.add_image("val_orig_img", torch.from_numpy(vis_image)[None], epoch)
-        tensorboard_writer.add_image("val_recon_img", torch.from_numpy(vis_recon)[None], epoch)
+        tensorboard_writer.add_image(
+            "val_orig_img", torch.from_numpy(vis_image)[None], epoch
+        )
+        tensorboard_writer.add_image(
+            "val_recon_img", torch.from_numpy(vis_recon)[None], epoch
+        )
 
         # Save comparison plot
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-        ax1.imshow(vis_image, cmap='gray')
+        ax1.imshow(vis_image, cmap="gray")
         ax1.set_title("Original")
-        ax2.imshow(vis_recon, cmap='gray')
+        ax2.imshow(vis_recon, cmap="gray")
         ax2.set_title("Reconstruction")
-        plt.savefig(f"{args.run_dir}/reconstructions/reconstruction_epoch_{epoch:03d}.png")
+        plt.savefig(
+            f"{args.run_dir}/reconstructions/reconstruction_epoch_{epoch:03d}.png"
+        )
         plt.close()
 ###################################################################################################
-

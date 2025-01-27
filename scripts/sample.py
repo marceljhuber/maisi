@@ -28,7 +28,12 @@ from tqdm import tqdm
 
 from .augmentation import augmentation
 from .find_masks import find_masks
-from .utils import binarize_labels, general_mask_generation_post_process, get_body_region_index_from_mask, remap_labels
+from .utils import (
+    binarize_labels,
+    general_mask_generation_post_process,
+    get_body_region_index_from_mask,
+    remap_labels,
+)
 from .quality_check import is_outlier
 
 
@@ -115,12 +120,16 @@ def ldm_conditional_sample_one_mask(
     Returns:
         torch.Tensor: The generated synthetic mask.
     """
-    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(device)
+    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
+        device
+    )
 
     with torch.no_grad(), torch.amp.autocast("cuda"):
         # Generate random noise
         latents = initialize_noise_latents(latent_shape, device)
-        anatomy_size = torch.FloatTensor(anatomy_size).unsqueeze(0).unsqueeze(0).half().to(device)
+        anatomy_size = (
+            torch.FloatTensor(anatomy_size).unsqueeze(0).unsqueeze(0).half().to(device)
+        )
         # synthesize latents
         noise_scheduler.set_timesteps(num_inference_steps=num_inference_steps)
         inferer_ddpm = DiffusionInferer(noise_scheduler)
@@ -132,7 +141,9 @@ def ldm_conditional_sample_one_mask(
             conditioning=anatomy_size.to(device),
         )
         # decode latents to synthesized masks
-        if math.prod(latent_shape[1:]) <= math.prod(autoencoder_sliding_window_infer_size):
+        if math.prod(latent_shape[1:]) <= math.prod(
+            autoencoder_sliding_window_infer_size
+        ):
             synthetic_mask = recon_model(latents).cpu().detach()
         else:
             synthetic_mask = (
@@ -169,7 +180,9 @@ def ldm_conditional_sample_one_mask(
                 target_tumor_label = labels[index]
 
         logging.info(f"target_tumor_label for postprocess:{target_tumor_label}")
-        data = general_mask_generation_post_process(data, target_tumor_label=target_tumor_label, device=device)
+        data = general_mask_generation_post_process(
+            data, target_tumor_label=target_tumor_label, device=device
+        )
         synthetic_mask = torch.from_numpy(data).unsqueeze(0).unsqueeze(0).to(device)
 
     return synthetic_mask
@@ -224,7 +237,9 @@ def ldm_conditional_sample_one_image(
     b_min = 0.0
     b_max = 1
 
-    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(device)
+    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
+        device
+    )
 
     with torch.no_grad(), torch.amp.autocast("cuda"):
         logging.info("---- Start generating latent features... ----")
@@ -239,7 +254,9 @@ def ldm_conditional_sample_one_image(
             logging.info(
                 "output_size is not a desired value. Need to interpolate the mask to match with output_size. The result image will be very low quality."
             )
-            combine_label = torch.nn.functional.interpolate(combine_label, size=output_size, mode="nearest")
+            combine_label = torch.nn.functional.interpolate(
+                combine_label, size=output_size, mode="nearest"
+            )
 
         controlnet_cond_vis = binarize_labels(combine_label.as_tensor().long()).half()
 
@@ -267,14 +284,18 @@ def ldm_conditional_sample_one_image(
             )
             latents, _ = noise_scheduler.step(noise_pred, t, latents)
         end_time = time.time()
-        logging.info(f"---- Latent features generation time: {end_time - start_time} seconds ----")
+        logging.info(
+            f"---- Latent features generation time: {end_time - start_time} seconds ----"
+        )
         del noise_pred
         torch.cuda.empty_cache()
 
         # decode latents to synthesized images
         logging.info("---- Start decoding latent features into images... ----")
         start_time = time.time()
-        if math.prod(latent_shape[1:]) <= math.prod(autoencoder_sliding_window_infer_size):
+        if math.prod(latent_shape[1:]) <= math.prod(
+            autoencoder_sliding_window_infer_size
+        ):
             synthetic_images = recon_model(latents)
         else:
             synthetic_images = sliding_window_inference(
@@ -373,14 +394,20 @@ def check_input(
     """
     # check output_size and spacing format
     if output_size[0] != output_size[1]:
-        raise ValueError(f"The first two components of output_size need to be equal, yet got {output_size}.")
-    if (output_size[0] not in [256, 384, 512]) or (output_size[2] not in [128, 256, 384, 512, 640, 768]):
+        raise ValueError(
+            f"The first two components of output_size need to be equal, yet got {output_size}."
+        )
+    if (output_size[0] not in [256, 384, 512]) or (
+        output_size[2] not in [128, 256, 384, 512, 640, 768]
+    ):
         raise ValueError(
             f"The output_size[0] have to be chosen from [256, 384, 512], and output_size[2] have to be chosen from [128, 256, 384, 512, 640, 768], yet got {output_size}."
         )
 
     if spacing[0] != spacing[1]:
-        raise ValueError(f"The first two components of spacing need to be equal, yet got {spacing}.")
+        raise ValueError(
+            f"The first two components of spacing need to be equal, yet got {spacing}."
+        )
     if spacing[0] < 0.5 or spacing[0] > 3.0 or spacing[2] < 0.5 or spacing[2] > 5.0:
         raise ValueError(
             f"spacing[0] have to be between 0.5 and 3.0 mm, spacing[2] have to be between 0.5 and 5.0 mm, yet got {spacing}."
@@ -415,7 +442,9 @@ def check_input(
         "colon cancer primaries",
         "pancreatic tumor",
     ]
-    available_controllable_anatomy = available_controllable_organ + available_controllable_tumor
+    available_controllable_anatomy = (
+        available_controllable_organ + available_controllable_tumor
+    )
     controllable_tumor = []
     controllable_organ = []
     for controllable_anatomy_size_pair in controllable_anatomy_size:
@@ -429,14 +458,23 @@ def check_input(
             controllable_organ += [controllable_anatomy_size_pair[0]]
         if controllable_anatomy_size_pair[1] == -1:
             continue
-        if controllable_anatomy_size_pair[1] < 0 or controllable_anatomy_size_pair[1] > 1.0:
+        if (
+            controllable_anatomy_size_pair[1] < 0
+            or controllable_anatomy_size_pair[1] > 1.0
+        ):
             raise ValueError(
                 f"The controllable size scale have to be between 0 and 1,0, or equal to -1, yet got {controllable_anatomy_size_pair[1]}."
             )
-    if len(controllable_tumor + controllable_organ) != len(list(set(controllable_tumor + controllable_organ))):
-        raise ValueError(f"Please do not repeat controllable_anatomy. Got {controllable_tumor + controllable_organ}.")
+    if len(controllable_tumor + controllable_organ) != len(
+        list(set(controllable_tumor + controllable_organ))
+    ):
+        raise ValueError(
+            f"Please do not repeat controllable_anatomy. Got {controllable_tumor + controllable_organ}."
+        )
     if len(controllable_tumor) > 1:
-        raise ValueError(f"Only one controllable tumor is supported. Yet got {controllable_tumor}.")
+        raise ValueError(
+            f"Only one controllable tumor is supported. Yet got {controllable_tumor}."
+        )
 
     if len(controllable_anatomy_size) > 0:
         logging.info(
@@ -469,7 +507,9 @@ def check_input(
                 raise ValueError(
                     f"The components in anatomy_list have to be chosen from {label_dict.keys()}, yet got {anatomy}."
                 )
-    logging.info(f"The generate results will have voxel size to be {spacing}mm, volume size to be {output_size}.")
+    logging.info(
+        f"The generate results will have voxel size to be {spacing}mm, volume size to be {output_size}."
+    )
 
     return
 
@@ -508,7 +548,7 @@ class LDMSampler:
         controllable_anatomy_size,
         image_output_ext=".nii.gz",
         label_output_ext=".nii.gz",
-        real_img_median_statistics="./configs/image_median_statistics.json",
+        real_img_median_statistics="./configs_old/image_median_statistics.json",
         spacing=[1, 1, 1],
         num_inference_steps=None,
         mask_generation_num_inference_steps=None,
@@ -552,15 +592,24 @@ class LDMSampler:
         self.noise_factor = 1.0
         self.controllable_anatomy_size = controllable_anatomy_size
         if len(self.controllable_anatomy_size):
-            logging.info("controllable_anatomy_size is given, mask generation is triggered!")
+            logging.info(
+                "controllable_anatomy_size is given, mask generation is triggered!"
+            )
             # overwrite the anatomy_list by given organs in self.controllable_anatomy_size
-            self.anatomy_list = [label_dict[organ_and_size[0]] for organ_and_size in self.controllable_anatomy_size]
+            self.anatomy_list = [
+                label_dict[organ_and_size[0]]
+                for organ_and_size in self.controllable_anatomy_size
+            ]
         self.image_output_ext = image_output_ext
         self.label_output_ext = label_output_ext
         # Set the default value for number of inference steps to 1000
-        self.num_inference_steps = num_inference_steps if num_inference_steps is not None else 1000
+        self.num_inference_steps = (
+            num_inference_steps if num_inference_steps is not None else 1000
+        )
         self.mask_generation_num_inference_steps = (
-            mask_generation_num_inference_steps if mask_generation_num_inference_steps is not None else 1000
+            mask_generation_num_inference_steps
+            if mask_generation_num_inference_steps is not None
+            else 1000
         )
 
         if any(size % 16 != 0 for size in autoencoder_sliding_window_infer_size):
@@ -571,11 +620,17 @@ class LDMSampler:
             raise ValueError(
                 f"Value of autoencoder_sliding_window_infer_overlap must be between 0 and 1.\n Got {autoencoder_sliding_window_infer_overlap}"
             )
-        self.autoencoder_sliding_window_infer_size = autoencoder_sliding_window_infer_size
-        self.autoencoder_sliding_window_infer_overlap = autoencoder_sliding_window_infer_overlap
+        self.autoencoder_sliding_window_infer_size = (
+            autoencoder_sliding_window_infer_size
+        )
+        self.autoencoder_sliding_window_infer_overlap = (
+            autoencoder_sliding_window_infer_overlap
+        )
 
         # quality check args
-        self.max_try_time = 5  # if not pass quality check, will try self.max_try_time times
+        self.max_try_time = (
+            5  # if not pass quality check, will try self.max_try_time times
+        )
         with open(real_img_median_statistics, "r") as json_file:
             self.median_statistics = json.load(json_file)
         self.label_int_dict = {
@@ -608,11 +663,21 @@ class LDMSampler:
                 monai.transforms.EnsureChannelFirstd(keys=["pseudo_label"]),
                 monai.transforms.Orientationd(keys=["pseudo_label"], axcodes="RAS"),
                 monai.transforms.EnsureTyped(keys=["pseudo_label"], dtype=torch.uint8),
-                monai.transforms.Lambdad(keys="top_region_index", func=lambda x: torch.FloatTensor(x)),
-                monai.transforms.Lambdad(keys="bottom_region_index", func=lambda x: torch.FloatTensor(x)),
-                monai.transforms.Lambdad(keys="spacing", func=lambda x: torch.FloatTensor(x)),
-                monai.transforms.Lambdad(keys="top_region_index", func=lambda x: x * 1e2),
-                monai.transforms.Lambdad(keys="bottom_region_index", func=lambda x: x * 1e2),
+                monai.transforms.Lambdad(
+                    keys="top_region_index", func=lambda x: torch.FloatTensor(x)
+                ),
+                monai.transforms.Lambdad(
+                    keys="bottom_region_index", func=lambda x: torch.FloatTensor(x)
+                ),
+                monai.transforms.Lambdad(
+                    keys="spacing", func=lambda x: torch.FloatTensor(x)
+                ),
+                monai.transforms.Lambdad(
+                    keys="top_region_index", func=lambda x: x * 1e2
+                ),
+                monai.transforms.Lambdad(
+                    keys="bottom_region_index", func=lambda x: x * 1e2
+                ),
                 monai.transforms.Lambdad(keys="spacing", func=lambda x: x * 1e2),
             ]
         )
@@ -631,7 +696,9 @@ class LDMSampler:
             # create a dummy selected_mask_files for placeholder
             selected_mask_files = list(range(num_img))
             # prerpare organ size conditions
-            anatomy_size_condtion = self.prepare_anatomy_size_condtion(self.controllable_anatomy_size)
+            anatomy_size_condtion = self.prepare_anatomy_size_condtion(
+                self.controllable_anatomy_size
+            )
         else:
             need_resample = False
             # find candidate mask and save to candidate_mask_files
@@ -647,7 +714,9 @@ class LDMSampler:
             if len(candidate_mask_files) < num_img:
                 # if we cannot find enough masks based on the exact match of anatomy list, spacing, and output size,
                 # then we will try to find the closest mask in terms of  spacing, and output size.
-                logging.info("Resample mask file to get desired output size and spacing")
+                logging.info(
+                    "Resample mask file to get desired output size and spacing"
+                )
                 candidate_mask_files = self.find_closest_masks(num_img)
                 need_resample = True
 
@@ -679,12 +748,16 @@ class LDMSampler:
                     spacing_tensor,
                 ) = self.read_mask_information(mask_file)
                 if need_resample:
-                    combine_label_or = self.ensure_output_size_and_spacing(combine_label_or)
+                    combine_label_or = self.ensure_output_size_and_spacing(
+                        combine_label_or
+                    )
                 # mask augmentation
                 if if_aug:
                     combine_label_or = augmentation(combine_label_or, self.output_size)
             end_time = time.time()
-            logging.info(f"---- Mask preparation time: {end_time - start_time} seconds ----")
+            logging.info(
+                f"---- Mask preparation time: {end_time - start_time} seconds ----"
+            )
             torch.cuda.empty_cache()
             # generate image/label pairs
             to_generate = True
@@ -698,13 +771,16 @@ class LDMSampler:
                 )
                 # synthetic image quality check
                 pass_quality_check = self.quality_check(
-                    synthetic_images.cpu().detach().numpy(), combine_label_or.cpu().detach().numpy()
+                    synthetic_images.cpu().detach().numpy(),
+                    combine_label_or.cpu().detach().numpy(),
                 )
                 if pass_quality_check or try_time > self.max_try_time:
                     # save image/label pairs
                     output_postfix = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                     synthetic_labels.meta["filename_or_obj"] = "sample.nii.gz"
-                    synthetic_images = MetaTensor(synthetic_images, meta=synthetic_labels.meta)
+                    synthetic_images = MetaTensor(
+                        synthetic_images, meta=synthetic_labels.meta
+                    )
                     img_saver = SaveImage(
                         output_dir=self.output_dir,
                         output_postfix=output_postfix + "_image",
@@ -713,10 +789,13 @@ class LDMSampler:
                     )
                     img_saver(synthetic_images[0])
                     synthetic_images_filename = os.path.join(
-                        self.output_dir, "sample_" + output_postfix + "_image" + self.image_output_ext
+                        self.output_dir,
+                        "sample_" + output_postfix + "_image" + self.image_output_ext,
                     )
                     # filter out the organs that are not in anatomy_list
-                    synthetic_labels = filter_mask_with_organs(synthetic_labels, self.anatomy_list)
+                    synthetic_labels = filter_mask_with_organs(
+                        synthetic_labels, self.anatomy_list
+                    )
                     label_saver = SaveImage(
                         output_dir=self.output_dir,
                         output_postfix=output_postfix + "_label",
@@ -725,9 +804,12 @@ class LDMSampler:
                     )
                     label_saver(synthetic_labels[0])
                     synthetic_labels_filename = os.path.join(
-                        self.output_dir, "sample_" + output_postfix + "_label" + self.label_output_ext
+                        self.output_dir,
+                        "sample_" + output_postfix + "_label" + self.label_output_ext,
                     )
-                    output_filenames.append([synthetic_images_filename, synthetic_labels_filename])
+                    output_filenames.append(
+                        [synthetic_images_filename, synthetic_labels_filename]
+                    )
                     to_generate = False
                 else:
                     logging.info(
@@ -868,13 +950,28 @@ class LDMSampler:
         combine_label_or = MetaTensor(combine_label_or, affine=affine)
         combine_label_or = self.ensure_output_size_and_spacing(combine_label_or)
 
-        top_region_index, bottom_region_index = get_body_region_index_from_mask(combine_label_or)
+        top_region_index, bottom_region_index = get_body_region_index_from_mask(
+            combine_label_or
+        )
 
-        spacing_tensor = torch.FloatTensor(self.spacing).unsqueeze(0).half().to(self.device) * 1e2
-        top_region_index_tensor = torch.FloatTensor(top_region_index).unsqueeze(0).half().to(self.device) * 1e2
-        bottom_region_index_tensor = torch.FloatTensor(bottom_region_index).unsqueeze(0).half().to(self.device) * 1e2
+        spacing_tensor = (
+            torch.FloatTensor(self.spacing).unsqueeze(0).half().to(self.device) * 1e2
+        )
+        top_region_index_tensor = (
+            torch.FloatTensor(top_region_index).unsqueeze(0).half().to(self.device)
+            * 1e2
+        )
+        bottom_region_index_tensor = (
+            torch.FloatTensor(bottom_region_index).unsqueeze(0).half().to(self.device)
+            * 1e2
+        )
 
-        return combine_label_or, top_region_index_tensor, bottom_region_index_tensor, spacing_tensor
+        return (
+            combine_label_or,
+            top_region_index_tensor,
+            bottom_region_index_tensor,
+            spacing_tensor,
+        )
 
     def sample_one_mask(self, anatomy_size):
         """
@@ -916,7 +1013,11 @@ class LDMSampler:
         Raises:
             ValueError: If the resampled mask doesn't contain required class labels.
         """
-        current_spacing = [labels.affine[0, 0], labels.affine[1, 1], labels.affine[2, 2]]
+        current_spacing = [
+            labels.affine[0, 0],
+            labels.affine[1, 1],
+            labels.affine[2, 2],
+        ]
         current_shape = list(labels.squeeze().shape)
 
         need_resample = False
@@ -933,8 +1034,12 @@ class LDMSampler:
             logging.info("Resampling mask to target shape and spacing")
             logging.info(f"Resize Spacing: {current_spacing} -> {self.spacing}")
             logging.info(f"Output size: {current_shape} -> {self.output_size}")
-            spacing = monai.transforms.Spacing(pixdim=tuple(self.spacing), mode="nearest")
-            pad_crop = monai.transforms.ResizeWithPadOrCrop(spatial_size=tuple(self.output_size))
+            spacing = monai.transforms.Spacing(
+                pixdim=tuple(self.spacing), mode="nearest"
+            )
+            pad_crop = monai.transforms.ResizeWithPadOrCrop(
+                spatial_size=tuple(self.output_size)
+            )
             labels = pad_crop(spacing(labels.squeeze(0))).unsqueeze(0).to(labels.dtype)
 
             contained_labels = torch.unique(labels)
@@ -1011,10 +1116,14 @@ class LDMSampler:
                 diff += abs(c["spacing"][axis] - self.spacing[axis])
             new_candidates.append((c, diff))
         # choose top-2*num_img candidates (at least 5)
-        new_candidates = sorted(new_candidates, key=lambda x: x[1])[: max(2 * num_img, 5)]
+        new_candidates = sorted(new_candidates, key=lambda x: x[1])[
+            : max(2 * num_img, 5)
+        ]
         final_candidates = []
         # check top-2*num_img candidates and update spacing after resampling
-        image_loader = monai.transforms.LoadImage(image_only=True, ensure_channel_first=True)
+        image_loader = monai.transforms.LoadImage(
+            image_only=True, ensure_channel_first=True
+        )
         for c, _ in new_candidates:
             label = image_loader(c["pseudo_label"])
             try:
@@ -1025,7 +1134,9 @@ class LDMSampler:
                 else:
                     raise e
             # get region_index after resample
-            top_region_index, bottom_region_index = get_body_region_index_from_mask(label)
+            top_region_index, bottom_region_index = get_body_region_index_from_mask(
+                label
+            )
             c["top_region_index"] = top_region_index
             c["bottom_region_index"] = bottom_region_index
             c["spacing"] = self.spacing
@@ -1045,7 +1156,9 @@ class LDMSampler:
         Returns:
             bool: True if the image passes the quality check, False otherwise.
         """
-        outlier_results = is_outlier(self.median_statistics, image_data, label_data, self.label_int_dict)
+        outlier_results = is_outlier(
+            self.median_statistics, image_data, label_data, self.label_int_dict
+        )
         for label, result in outlier_results.items():
             if result.get("is_outlier", False):
                 logging.info(
