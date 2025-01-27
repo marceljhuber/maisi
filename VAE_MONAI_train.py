@@ -25,9 +25,7 @@ from torchvision import transforms
 from tqdm import tqdm
 
 from scripts.utils import KL_loss, dynamic_infer
-from scripts.utils_plot import (
-    visualize_2d,
-)
+from scripts.utils_plot import visualize_2d
 
 warnings.filterwarnings("ignore")
 
