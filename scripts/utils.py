@@ -27,7 +27,12 @@ from monai.bundle import ConfigParser
 from monai.config import DtypeLike, NdarrayOrTensor
 from monai.data import CacheDataset, DataLoader, partition_dataset
 from monai.transforms import Compose, EnsureTyped, Lambdad, LoadImaged, Orientationd
-from monai.utils import TransformBackends, convert_data_type, convert_to_dst_type, get_equivalent_dtype
+from monai.utils import (
+    TransformBackends,
+    convert_data_type,
+    convert_to_dst_type,
+    get_equivalent_dtype,
+)
 from scipy import stats
 from torch import Tensor
 
@@ -70,7 +75,15 @@ def get_index_arr(img):
     """
     return np.moveaxis(
         np.moveaxis(
-            np.stack(np.meshgrid(np.arange(img.shape[0]), np.arange(img.shape[1]), np.arange(img.shape[2]))), 0, 3
+            np.stack(
+                np.meshgrid(
+                    np.arange(img.shape[0]),
+                    np.arange(img.shape[1]),
+                    np.arange(img.shape[2]),
+                )
+            ),
+            0,
+            3,
         ),
         0,
         1,
@@ -104,7 +117,11 @@ def supress_non_largest_components(img, target_label, default_val=0):
         if len(dominant_vals) >= 2:  # Case: no predictions
             new_background = np.logical_or(
                 new_background,
-                np.logical_not(np.logical_or(label_cc == dominant_vals[0], label_cc == dominant_vals[1])),
+                np.logical_not(
+                    np.logical_or(
+                        label_cc == dominant_vals[0], label_cc == dominant_vals[1]
+                    )
+                ),
             )
 
     for voxel in index_arr[new_background]:
@@ -114,7 +131,9 @@ def supress_non_largest_components(img, target_label, default_val=0):
     return img_mod, diff
 
 
-def erode_one_img(mask_t: Tensor, filter_size: int | Sequence[int] = 3, pad_value: float = 1.0) -> Tensor:
+def erode_one_img(
+    mask_t: Tensor, filter_size: int | Sequence[int] = 3, pad_value: float = 1.0
+) -> Tensor:
     """
     Erode 2D/3D binary mask with data type as torch tensor.
 
@@ -143,7 +162,9 @@ def erode_one_img(mask_t: Tensor, filter_size: int | Sequence[int] = 3, pad_valu
     )
 
 
-def dilate_one_img(mask_t: Tensor, filter_size: int | Sequence[int] = 3, pad_value: float = 0.0) -> Tensor:
+def dilate_one_img(
+    mask_t: Tensor, filter_size: int | Sequence[int] = 3, pad_value: float = 0.0
+) -> Tensor:
     """
     Dilate 2D/3D binary mask with data type as torch tensor.
 
@@ -187,7 +208,9 @@ def binarize_labels(x: Tensor, bits: int = 8) -> Tensor:
         Tensor: Binary representation of the input tensor with shape (B, bits, H, W, D).
     """
     mask = 2 ** torch.arange(bits).to(x.device, x.dtype)
-    return x.unsqueeze(-1).bitwise_and(mask).ne(0).byte().squeeze(1).permute(0, 4, 1, 2, 3)
+    return (
+        x.unsqueeze(-1).bitwise_and(mask).ne(0).byte().squeeze(1).permute(0, 4, 1, 2, 3)
+    )
 
 
 def setup_ddp(rank: int, world_size: int) -> torch.device:
@@ -202,7 +225,11 @@ def setup_ddp(rank: int, world_size: int) -> torch.device:
         torch.device: device of the current process.
     """
     dist.init_process_group(
-        backend="nccl", init_method="env://", timeout=timedelta(seconds=36000), rank=rank, world_size=world_size
+        backend="nccl",
+        init_method="env://",
+        timeout=timedelta(seconds=36000),
+        rank=rank,
+        world_size=world_size,
     )
     dist.barrier()
     device = torch.device(f"cuda:{rank}")
@@ -228,7 +255,9 @@ def define_instance(args: Namespace, instance_def_key: str) -> Any:
     return parser.get_parsed_content(instance_def_key, instantiate=True)
 
 
-def add_data_dir2path(list_files: list, data_dir: str, fold: int = None) -> tuple[list, list]:
+def add_data_dir2path(
+    list_files: list, data_dir: str, fold: int = None
+) -> tuple[list, list]:
     """
     Read a list of data dictionary.
 
@@ -309,9 +338,14 @@ def prepare_maisi_controlnet_json_dataloader(
         Lambdad(keys="top_region_index", func=lambda x: torch.FloatTensor(x)),
         Lambdad(keys="bottom_region_index", func=lambda x: torch.FloatTensor(x)),
         Lambdad(keys="spacing", func=lambda x: torch.FloatTensor(x)),
-        Lambdad(keys=["top_region_index", "bottom_region_index", "spacing"], func=lambda x: x * 1e2),
+        Lambdad(
+            keys=["top_region_index", "bottom_region_index", "spacing"],
+            func=lambda x: x * 1e2,
+        ),
     ]
-    train_transforms, val_transforms = Compose(common_transform), Compose(common_transform)
+    train_transforms, val_transforms = Compose(common_transform), Compose(
+        common_transform
+    )
 
     train_loader = None
 
@@ -322,8 +356,15 @@ def prepare_maisi_controlnet_json_dataloader(
             num_partitions=world_size,
             even_divisible=True,
         )[rank]
-    train_ds = CacheDataset(data=list_train, transform=train_transforms, cache_rate=cache_rate, num_workers=8)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
+    train_ds = CacheDataset(
+        data=list_train,
+        transform=train_transforms,
+        cache_rate=cache_rate,
+        num_workers=8,
+    )
+    train_loader = DataLoader(
+        train_ds, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True
+    )
     if use_ddp:
         list_valid = partition_dataset(
             data=list_valid,
@@ -337,11 +378,15 @@ def prepare_maisi_controlnet_json_dataloader(
         cache_rate=cache_rate,
         num_workers=8,
     )
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=False)
+    val_loader = DataLoader(
+        val_ds, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=False
+    )
     return train_loader, val_loader
 
 
-def organ_fill_by_closing(data, target_label, device, close_times=2, filter_size=3, pad_value=0.0):
+def organ_fill_by_closing(
+    data, target_label, device, close_times=2, filter_size=3, pad_value=0.0
+):
     """
     Fill holes in an organ mask using morphological closing operations.
 
@@ -381,7 +426,9 @@ def organ_fill_by_removed_mask(data, target_label, remove_mask, device):
         ndarray: Boolean mask of the filled organ in previously removed regions.
     """
     mask = (data == target_label).astype(np.uint8)
-    mask = dilate_one_img(torch.from_numpy(mask).to(device), filter_size=3, pad_value=0.0)
+    mask = dilate_one_img(
+        torch.from_numpy(mask).to(device), filter_size=3, pad_value=0.0
+    )
     mask = dilate_one_img(mask, filter_size=3, pad_value=0.0)
     roi_oragn_mask = dilate_one_img(mask, filter_size=3, pad_value=0.0).cpu().numpy()
     return (roi_oragn_mask * remove_mask).astype(np.bool_)
@@ -413,20 +460,28 @@ def get_body_region_index_from_mask(input_mask):
     # print(f"nda: {nda.shape} {unique_elements}.")
     overlap_array = np.zeros(len(region_indices), dtype=np.uint8)
     for _j in range(len(region_indices)):
-        overlap = any(element in region_indices[f"region_{_j}"] for element in unique_elements)
+        overlap = any(
+            element in region_indices[f"region_{_j}"] for element in unique_elements
+        )
         overlap_array[_j] = np.uint8(overlap)
     overlap_array_indices = np.nonzero(overlap_array)[0]
-    top_region_index = np.eye(len(region_indices), dtype=np.uint8)[np.amin(overlap_array_indices), ...]
+    top_region_index = np.eye(len(region_indices), dtype=np.uint8)[
+        np.amin(overlap_array_indices), ...
+    ]
     top_region_index = list(top_region_index)
     top_region_index = [int(_k) for _k in top_region_index]
-    bottom_region_index = np.eye(len(region_indices), dtype=np.uint8)[np.amax(overlap_array_indices), ...]
+    bottom_region_index = np.eye(len(region_indices), dtype=np.uint8)[
+        np.amax(overlap_array_indices), ...
+    ]
     bottom_region_index = list(bottom_region_index)
     bottom_region_index = [int(_k) for _k in bottom_region_index]
     # print(f"{top_region_index} {bottom_region_index}")
     return top_region_index, bottom_region_index
 
 
-def general_mask_generation_post_process(volume_t, target_tumor_label=None, device="cuda:0"):
+def general_mask_generation_post_process(
+    volume_t, target_tumor_label=None, device="cuda:0"
+):
     """
     Perform post-processing on a generated mask volume.
 
@@ -447,11 +502,17 @@ def general_mask_generation_post_process(volume_t, target_tumor_label=None, devi
 
     # ------------ refine body mask pred
     body_region_mask = (
-        erode_one_img(torch.from_numpy((volume_t > 0)).to(device), filter_size=3, pad_value=0.0).cpu().numpy()
+        erode_one_img(
+            torch.from_numpy((volume_t > 0)).to(device), filter_size=3, pad_value=0.0
+        )
+        .cpu()
+        .numpy()
     )
     body_region_mask, _ = supress_non_largest_components(body_region_mask, [1])
     body_region_mask = (
-        dilate_one_img(torch.from_numpy(body_region_mask).to(device), filter_size=3, pad_value=0.0)
+        dilate_one_img(
+            torch.from_numpy(body_region_mask).to(device), filter_size=3, pad_value=0.0
+        )
         .cpu()
         .numpy()
         .astype(np.uint8)
@@ -468,7 +529,9 @@ def general_mask_generation_post_process(volume_t, target_tumor_label=None, devi
             volume_t[organ_fill_by_closing(volume_t, target_label=t, device=device)] = t
     # we only keep the largest connected componet for tumors except hepatic tumor and bone lesion
     if target_tumor_label != 26 and target_tumor_label != 128:
-        volume_t, _ = supress_non_largest_components(volume_t, [target_tumor_label], default_val=200)
+        volume_t, _ = supress_non_largest_components(
+            volume_t, [target_tumor_label], default_val=200
+        )
     target_tumor = volume_t == target_tumor_label
 
     # ------------ remove undesired organ pred
@@ -477,7 +540,9 @@ def general_mask_generation_post_process(volume_t, target_tumor_label=None, devi
     oran_list = [1, 4, 10, 12, 3, 28, 29, 30, 31, 32, 5, 14, 13, 6, 7, 8, 9, 10]
     if target_tumor_label != 128:
         oran_list += list(range(33, 60))  # + list(range(63,87))
-    data, _ = supress_non_largest_components(volume_t, oran_list, default_val=200)  # 200 is body region
+    data, _ = supress_non_largest_components(
+        volume_t, oran_list, default_val=200
+    )  # 200 is body region
     organ_remove_mask = (volume_t - data).astype(np.bool_)
     # process intestinal system (stomach 12, duodenum 13, small bowel 19, colon 62)
     intestinal_mask_ = (
@@ -486,81 +551,158 @@ def general_mask_generation_post_process(volume_t, target_tumor_label=None, devi
         + (data == 19).astype(np.uint8)
         + (data == 62).astype(np.uint8)
     )
-    intestinal_mask, _ = supress_non_largest_components(intestinal_mask_, [1], default_val=0)
+    intestinal_mask, _ = supress_non_largest_components(
+        intestinal_mask_, [1], default_val=0
+    )
     # process small bowel 19
-    small_bowel_remove_mask = (data == 19).astype(np.uint8) - (data == 19).astype(np.uint8) * intestinal_mask
+    small_bowel_remove_mask = (data == 19).astype(np.uint8) - (data == 19).astype(
+        np.uint8
+    ) * intestinal_mask
     # process colon 62
-    colon_remove_mask = (data == 62).astype(np.uint8) - (data == 62).astype(np.uint8) * intestinal_mask
-    intestinal_remove_mask = (small_bowel_remove_mask + colon_remove_mask).astype(np.bool_)
+    colon_remove_mask = (data == 62).astype(np.uint8) - (data == 62).astype(
+        np.uint8
+    ) * intestinal_mask
+    intestinal_remove_mask = (small_bowel_remove_mask + colon_remove_mask).astype(
+        np.bool_
+    )
     data[intestinal_remove_mask] = 200
 
     # ------------ full correponding organ in removed regions
     for organ_label in oran_list:
-        data[organ_fill_by_closing(data, target_label=organ_label, device=device)] = organ_label
+        data[organ_fill_by_closing(data, target_label=organ_label, device=device)] = (
+            organ_label
+        )
 
     if target_tumor_label == 23 and np.sum(target_tumor) > 0:
         # speical process for cases with lung tumor
         dia_lung_tumor_mask = (
-            dilate_one_img(torch.from_numpy((data == 23)).to(device), filter_size=3, pad_value=0.0).cpu().numpy()
+            dilate_one_img(
+                torch.from_numpy((data == 23)).to(device), filter_size=3, pad_value=0.0
+            )
+            .cpu()
+            .numpy()
         )
         tmp = (
-            (data * (dia_lung_tumor_mask.astype(np.uint8) - (data == 23).astype(np.uint8))).astype(np.float32).flatten()
+            (
+                data
+                * (dia_lung_tumor_mask.astype(np.uint8) - (data == 23).astype(np.uint8))
+            )
+            .astype(np.float32)
+            .flatten()
         )
         tmp[tmp == 0] = float("nan")
         mode = int(stats.mode(tmp.flatten(), nan_policy="omit")[0])
         if mode in [28, 29, 30, 31, 32]:
             dia_lung_tumor_mask = (
-                dilate_one_img(torch.from_numpy(dia_lung_tumor_mask).to(device), filter_size=3, pad_value=0.0)
+                dilate_one_img(
+                    torch.from_numpy(dia_lung_tumor_mask).to(device),
+                    filter_size=3,
+                    pad_value=0.0,
+                )
                 .cpu()
                 .numpy()
             )
-            lung_remove_mask = dia_lung_tumor_mask.astype(np.uint8) - (data == 23).astype(np.uint8).astype(np.uint8)
-            data[organ_fill_by_removed_mask(data, target_label=mode, remove_mask=lung_remove_mask, device=device)] = (
-                mode
-            )
+            lung_remove_mask = dia_lung_tumor_mask.astype(np.uint8) - (
+                data == 23
+            ).astype(np.uint8).astype(np.uint8)
+            data[
+                organ_fill_by_removed_mask(
+                    data, target_label=mode, remove_mask=lung_remove_mask, device=device
+                )
+            ] = mode
         dia_lung_tumor_mask = (
-            dilate_one_img(torch.from_numpy(dia_lung_tumor_mask).to(device), filter_size=3, pad_value=0.0).cpu().numpy()
+            dilate_one_img(
+                torch.from_numpy(dia_lung_tumor_mask).to(device),
+                filter_size=3,
+                pad_value=0.0,
+            )
+            .cpu()
+            .numpy()
         )
         data[
             organ_fill_by_removed_mask(
-                data, target_label=23, remove_mask=dia_lung_tumor_mask * organ_remove_mask, device=device
+                data,
+                target_label=23,
+                remove_mask=dia_lung_tumor_mask * organ_remove_mask,
+                device=device,
             )
         ] = 23
         for organ_label in [28, 29, 30, 31, 32]:
-            data[organ_fill_by_closing(data, target_label=organ_label, device=device)] = organ_label
-            data[organ_fill_by_closing(data, target_label=organ_label, device=device)] = organ_label
-            data[organ_fill_by_closing(data, target_label=organ_label, device=device)] = organ_label
+            data[
+                organ_fill_by_closing(data, target_label=organ_label, device=device)
+            ] = organ_label
+            data[
+                organ_fill_by_closing(data, target_label=organ_label, device=device)
+            ] = organ_label
+            data[
+                organ_fill_by_closing(data, target_label=organ_label, device=device)
+            ] = organ_label
 
     if target_tumor_label == 26 and np.sum(target_tumor) > 0:
         # speical process for cases with hepatic tumor
         # process liver 1
-        data[organ_fill_by_removed_mask(data, target_label=1, remove_mask=intestinal_remove_mask, device=device)] = 1
-        data[organ_fill_by_removed_mask(data, target_label=1, remove_mask=intestinal_remove_mask, device=device)] = 1
+        data[
+            organ_fill_by_removed_mask(
+                data, target_label=1, remove_mask=intestinal_remove_mask, device=device
+            )
+        ] = 1
+        data[
+            organ_fill_by_removed_mask(
+                data, target_label=1, remove_mask=intestinal_remove_mask, device=device
+            )
+        ] = 1
         # process spleen 2
-        data[organ_fill_by_removed_mask(data, target_label=3, remove_mask=organ_remove_mask, device=device)] = 3
-        data[organ_fill_by_removed_mask(data, target_label=3, remove_mask=organ_remove_mask, device=device)] = 3
+        data[
+            organ_fill_by_removed_mask(
+                data, target_label=3, remove_mask=organ_remove_mask, device=device
+            )
+        ] = 3
+        data[
+            organ_fill_by_removed_mask(
+                data, target_label=3, remove_mask=organ_remove_mask, device=device
+            )
+        ] = 3
         dia_tumor_mask = (
-            dilate_one_img(torch.from_numpy((data == target_tumor_label)).to(device), filter_size=3, pad_value=0.0)
+            dilate_one_img(
+                torch.from_numpy((data == target_tumor_label)).to(device),
+                filter_size=3,
+                pad_value=0.0,
+            )
             .cpu()
             .numpy()
         )
         dia_tumor_mask = (
-            dilate_one_img(torch.from_numpy(dia_tumor_mask).to(device), filter_size=3, pad_value=0.0).cpu().numpy()
+            dilate_one_img(
+                torch.from_numpy(dia_tumor_mask).to(device),
+                filter_size=3,
+                pad_value=0.0,
+            )
+            .cpu()
+            .numpy()
         )
         data[
             organ_fill_by_removed_mask(
-                data, target_label=target_tumor_label, remove_mask=dia_tumor_mask * organ_remove_mask, device=device
+                data,
+                target_label=target_tumor_label,
+                remove_mask=dia_tumor_mask * organ_remove_mask,
+                device=device,
             )
         ] = target_tumor_label
         # refine hepatic tumor
         hepatic_tumor_vessel_liver_mask_ = (
-            (data == 26).astype(np.uint8) + (data == 25).astype(np.uint8) + (data == 1).astype(np.uint8)
+            (data == 26).astype(np.uint8)
+            + (data == 25).astype(np.uint8)
+            + (data == 1).astype(np.uint8)
         )
-        hepatic_tumor_vessel_liver_mask_ = (hepatic_tumor_vessel_liver_mask_ > 1).astype(np.uint8)
+        hepatic_tumor_vessel_liver_mask_ = (
+            hepatic_tumor_vessel_liver_mask_ > 1
+        ).astype(np.uint8)
         hepatic_tumor_vessel_liver_mask, _ = supress_non_largest_components(
             hepatic_tumor_vessel_liver_mask_, [1], default_val=0
         )
-        removed_region = (hepatic_tumor_vessel_liver_mask_ - hepatic_tumor_vessel_liver_mask).astype(np.bool_)
+        removed_region = (
+            hepatic_tumor_vessel_liver_mask_ - hepatic_tumor_vessel_liver_mask
+        ).astype(np.bool_)
         data[removed_region] = 200
         target_tumor = (target_tumor * hepatic_tumor_vessel_liver_mask).astype(np.bool_)
         # refine liver
@@ -571,25 +713,44 @@ def general_mask_generation_post_process(volume_t, target_tumor_label=None, devi
     if target_tumor_label == 27 and np.sum(target_tumor) > 0:
         # speical process for cases with colon tumor
         dia_tumor_mask = (
-            dilate_one_img(torch.from_numpy((data == target_tumor_label)).to(device), filter_size=3, pad_value=0.0)
+            dilate_one_img(
+                torch.from_numpy((data == target_tumor_label)).to(device),
+                filter_size=3,
+                pad_value=0.0,
+            )
             .cpu()
             .numpy()
         )
         dia_tumor_mask = (
-            dilate_one_img(torch.from_numpy(dia_tumor_mask).to(device), filter_size=3, pad_value=0.0).cpu().numpy()
+            dilate_one_img(
+                torch.from_numpy(dia_tumor_mask).to(device),
+                filter_size=3,
+                pad_value=0.0,
+            )
+            .cpu()
+            .numpy()
         )
         data[
             organ_fill_by_removed_mask(
-                data, target_label=target_tumor_label, remove_mask=dia_tumor_mask * organ_remove_mask, device=device
+                data,
+                target_label=target_tumor_label,
+                remove_mask=dia_tumor_mask * organ_remove_mask,
+                device=device,
             )
         ] = target_tumor_label
 
     if target_tumor_label == 129 and np.sum(target_tumor) > 0:
         # speical process for cases with kidney tumor
         for organ_label in [5, 14]:
-            data[organ_fill_by_closing(data, target_label=organ_label, device=device)] = organ_label
-            data[organ_fill_by_closing(data, target_label=organ_label, device=device)] = organ_label
-            data[organ_fill_by_closing(data, target_label=organ_label, device=device)] = organ_label
+            data[
+                organ_fill_by_closing(data, target_label=organ_label, device=device)
+            ] = organ_label
+            data[
+                organ_fill_by_closing(data, target_label=organ_label, device=device)
+            ] = organ_label
+            data[
+                organ_fill_by_closing(data, target_label=organ_label, device=device)
+            ] = organ_label
     # TODO: current model does not support hepatic vessel by size control.
     # we treat it as liver for better visiaulization
     print(
@@ -615,7 +776,12 @@ class MapLabelValue:
 
     backend = [TransformBackends.NUMPY, TransformBackends.TORCH]
 
-    def __init__(self, orig_labels: Sequence, target_labels: Sequence, dtype: DtypeLike = np.float32) -> None:
+    def __init__(
+        self,
+        orig_labels: Sequence,
+        target_labels: Sequence,
+        dtype: DtypeLike = np.float32,
+    ) -> None:
         """
         Args:
             orig_labels: original labels that map to others.
@@ -629,7 +795,9 @@ class MapLabelValue:
 
         self.orig_labels = orig_labels
         self.target_labels = target_labels
-        self.pair = tuple((o, t) for o, t in zip(self.orig_labels, self.target_labels) if o != t)
+        self.pair = tuple(
+            (o, t) for o, t in zip(self.orig_labels, self.target_labels) if o != t
+        )
         type_dtype = type(dtype)
         if getattr(type_dtype, "__module__", "") == "torch":
             self.use_numpy = False
@@ -693,20 +861,25 @@ def KL_loss(z_mu, z_sigma):
 
 def dynamic_infer(inferer, model, images):
     """
-    Perform dynamic inference using a model and an inferer, typically a monai SlidingWindowInferer.
-
-    This function determines whether to use the model directly or to use the provided inferer
-    (such as a sliding window inferer) based on the size of the input images.
+    Perform dynamic inference using a model and an inferer.
 
     Args:
-        inferer: An inference object, typically a monai SlidingWindowInferer, which handles patch-based inference.
-        model (torch.nn.Module): The model used for inference.
-        images (torch.Tensor): The input images for inference, shape [N,C,H,W,D] or [N,C,H,W].
+        inferer: An inference object (SimpleInferer or SlidingWindowInferer)
+        model (torch.nn.Module): The model used for inference
+        images (torch.Tensor): Input images, shape [N,C,H,W,D] or [N,C,H,W]
 
     Returns:
-        torch.Tensor: The output from the model or the inferer, depending on the input size.
+        tuple: (reconstruction, z_mu, z_sigma) from the model
     """
-    if torch.numel(images[0:1, 0:1, ...]) < math.prod(inferer.roi_size):
-        return model(images)
+    # Check if using SlidingWindowInferer
+    if hasattr(inferer, "roi_size"):
+        # For SlidingWindowInferer, check if we need to use sliding window
+        if torch.numel(images[0:1, 0:1, ...]) < math.prod(inferer.roi_size):
+            reconstruction, z_mu, z_sigma = model(images)
+        else:
+            reconstruction, z_mu, z_sigma = inferer(network=model, inputs=images)
     else:
-        return inferer(network=model, inputs=images)
+        # For SimpleInferer or any other inferer without roi_size
+        reconstruction, z_mu, z_sigma = model(images)
+
+    return reconstruction, z_mu, z_sigma

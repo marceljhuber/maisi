@@ -1,4 +1,9 @@
 {
+    "main": {
+        "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/test/0",
+        "trained_autoencoder_path": "./models/autoencoder_epoch17.pt",
+        "trained_unet_path": "./models/unet_epoch8.pt"
+    },
     "model_config": {
         "save_every": 1,
         "diffusion_unet_train": {
@@ -24,9 +29,7 @@
         "model_dir": "./models",
         "model_filename": "diff_unet_ckpt.pt",
         "output_dir": "./predictions",
-        "output_prefix": "unet_2d",
-        "trained_autoencoder_path": "./models/autoencoder_epoch17.pt",
-        "existing_ckpt_filepath": null
+        "output_prefix": "unet_2d"
     },
     "model_def": {
         "spatial_dims": 2,

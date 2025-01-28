@@ -130,17 +130,15 @@ def load_unet(
             unet, device_ids=[device], find_unused_parameters=True
         )
 
-    if args.existing_ckpt_filepath is None:
+    if args.trained_unet_path is None:
         logger.info("Training from scratch.")
     else:
-        checkpoint_unet = torch.load(
-            f"{args.existing_ckpt_filepath}", map_location=device
-        )
+        checkpoint_unet = torch.load(f"{args.trained_unet_path}", map_location=device)
         if dist.is_initialized():
             unet.module.load_state_dict(checkpoint_unet["unet_state_dict"], strict=True)
         else:
             unet.load_state_dict(checkpoint_unet["unet_state_dict"], strict=True)
-        logger.info(f"Pretrained checkpoint {args.existing_ckpt_filepath} loaded.")
+        logger.info(f"Pretrained checkpoint {args.trained_unet_path} loaded.")
 
     return unet
 
