@@ -9,7 +9,7 @@
         "model_filename": "diff_unet_ckpt.pt",
         "output_dir": "./predictions",
         "output_prefix": "unet_2d",
-        "trained_autoencoder_path": "./models/autoencoder_epoch17.pt",
+        "trained_autoencoder_path": "./models/autoencoder_epoch_20.pt",
         "trained_diffusion_path": "./models/checkpoint_epoch_5.pt"
     },
     "training": {

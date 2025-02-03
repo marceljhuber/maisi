@@ -2,3 +2,5 @@
 /wandb/
 *.pt
 /runs/
+/configs_nv/
+/backup/

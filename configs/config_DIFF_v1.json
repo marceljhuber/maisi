@@ -1,7 +1,7 @@
 {
     "main": {
         "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/test/0",
-        "trained_autoencoder_path": "./models/autoencoder_epoch17.pt",
+        "trained_autoencoder_path": "./models/model_best.pt",
         "trained_unet_path": "./models/unet_epoch8.pt"
     },
     "model_config": {
