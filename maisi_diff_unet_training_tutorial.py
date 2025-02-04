@@ -183,8 +183,11 @@ def main():
     }
 
     datalist_file = os.path.join(run_dir, "datalist.json")
+    config_save_path = os.path.join(run_dir, "config.json")
     with open(datalist_file, "w") as f:
         json.dump(datalist, f)
+    with open(config_save_path, "w") as f:
+        json.dump(config, f, indent=4)
 
     # Initialize wandb
     wandb.init(
@@ -198,24 +201,24 @@ def main():
         print(f"Resuming training from checkpoint: {args.checkpoint}")
         print(f"Starting from epoch: {start_epoch}")
 
-    # Save configurations
-    env_config_path = os.path.join(run_dir, "environment.json")
-    model_config_path = os.path.join(run_dir, "model_config.json")
-    model_def_path = os.path.join(run_dir, "model_def.json")
-
-    with open(env_config_path, "w") as f:
-        json.dump(config["env_config"], f, indent=4)
-    with open(model_config_path, "w") as f:
-        json.dump(config["model_config"], f, indent=4)
-    with open(model_def_path, "w") as f:
-        json.dump(config["model_def"], f, indent=4)
-
-    print(
-        "Config paths:",
-        f"env: {env_config_path} ({type(env_config_path)})",
-        f"model: {model_config_path} ({type(model_config_path)})",
-        f"def: {model_def_path} ({type(model_def_path)})",
-    )
+    # # Save configurations
+    # env_config_path = os.path.join(run_dir, "environment.json")
+    # model_config_path = os.path.join(run_dir, "model_config.json")
+    # vae_def_path = os.path.join(run_dir, "vae_def.json")
+    #
+    # with open(env_config_path, "w") as f:
+    #     json.dump(config["env_config"], f, indent=4)
+    # with open(model_config_path, "w") as f:
+    #     json.dump(config["model_config"], f, indent=4)
+    # with open(config, "w") as f:
+    #     json.dump(config, f, indent=4)
+    # #
+    # print(
+    #     "Config paths:",
+    #     f"env: {env_config_path} ({type(env_config_path)})",
+    #     f"model: {model_config_path} ({type(model_config_path)})",
+    #     f"def: {vae_def_path} ({type(vae_def_path)})",
+    # )
 
     # Also print config contents
     print("Config contents:", config.keys())
@@ -223,10 +226,8 @@ def main():
     # Start training
     logger.info("Training the model...")
     diff_model_train(
-        env_config_path,
-        model_config_path,
-        model_def_path,
-        num_gpus=1,
+        config,
+        run_dir,
         amp=True,
         start_epoch=start_epoch,
         wandb_run=wandb.run,
