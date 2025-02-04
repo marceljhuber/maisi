@@ -93,7 +93,7 @@ def setup_training_dirs(config_name, checkpoint_path=None):
     model_save_path = model_dir / "diffusion_model.pt"
     start_epoch = 0
 
-    if checkpoint_path is not None:
+    if checkpoint_path is not None and checkpoint_path != "None":
         if not os.path.exists(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found at {checkpoint_path}")
         checkpoint_name = os.path.basename(checkpoint_path)
@@ -134,6 +134,9 @@ def main():
     parser = argparse.ArgumentParser(description="Train diffusion model")
     parser.add_argument("--config", type=str, default="./configs/config_DIFF_v1.json")
     parser.add_argument("--config_name", type=str, default="DIFFUSION")
+    parser.add_argument(
+        "--checkpoint", type=str, default=None, help="Path to checkpoint file"
+    )
     args = parser.parse_args()
 
     # Setup
@@ -146,36 +149,52 @@ def main():
     with open(args.config) as f:
         config = json.load(f)
 
-    # Get list of image files
-    image_files = list_image_files(config["main"]["image_dir"])
-    train_imgs, val_imgs = split_train_val_by_patient(image_files)
+    config["env_config"]["trained_unet_path"] = config["main"]["trained_unet_path"]
 
-    # Create training dataset structure
-    work_dir = os.path.abspath("./temp_work_dir")
-    if not os.path.isdir(work_dir):
-        os.makedirs(work_dir)
-
-    dataroot_dir = os.path.join(work_dir, "processed_data")
-    if not os.path.isdir(dataroot_dir):
-        os.makedirs(dataroot_dir)
-
-    # Process images
-    processed_train_imgs = []
-    processed_val_imgs = []
-
-    for img_path in train_imgs:
-        processed_path = process_image(img_path, dataroot_dir, "train")
-        processed_train_imgs.append({"image": processed_path})
-
-    for img_path in val_imgs:
-        processed_path = process_image(img_path, dataroot_dir, "val")
-        processed_val_imgs.append({"image": processed_path})
-
-    # Create datalist
+    # # Get list of image files
+    # image_files = list_image_files(config["main"]["image_dir"])
+    # train_imgs, val_imgs = split_train_val_by_patient(image_files)
+    #
+    # # Create training dataset structure
+    # work_dir = os.path.abspath("./temp_work_dir")
+    # if not os.path.isdir(work_dir):
+    #     os.makedirs(work_dir)
+    #
+    # dataroot_dir = os.path.join(work_dir, "processed_data")
+    # if not os.path.isdir(dataroot_dir):
+    #     os.makedirs(dataroot_dir)
+    #
+    # # Process images
+    # processed_train_imgs = []
+    # processed_val_imgs = []
+    #
+    # for img_path in train_imgs:
+    #     processed_path = process_image(img_path, dataroot_dir, "train")
+    #     processed_train_imgs.append({"image": processed_path})
+    #
+    # for img_path in val_imgs:
+    #     processed_path = process_image(img_path, dataroot_dir, "val")
+    #     processed_val_imgs.append({"image": processed_path})
+    #
+    # # Create datalist
     # datalist = {"training": processed_train_imgs, "validation": processed_val_imgs}
     # datalist_file = os.path.join(work_dir, "datalist.json")
     # with open(datalist_file, "w") as f:
     #     json.dump(datalist, f)
+
+    # Get list of image files directly
+    image_files = list_image_files(config["main"]["image_dir"])
+    train_imgs, val_imgs = split_train_val_by_patient(image_files)
+
+    # Create datalist directly with image paths
+    datalist = {
+        "training": [{"image": path} for path in train_imgs],
+        "validation": [{"image": path} for path in val_imgs],
+    }
+
+    datalist_file = os.path.join(run_dir, "datalist.json")
+    with open(datalist_file, "w") as f:
+        json.dump(datalist, f)
 
     # Initialize wandb
     wandb.init(
@@ -184,34 +203,29 @@ def main():
         name=f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
     )
 
-    # # Create configs with updated paths
-    # env_config = config["env_config"]
-    # model_config = config["model_config"]
-    # model_def = config["model_def"]
-    #
-    # # Save configurations to new run directory
-    # env_config_filepath = os.path.join(run_dir, "environment.json")
-    # model_config_filepath = os.path.join(run_dir, "model_config.json")
-    # model_def_filepath = os.path.join(run_dir, "model_def.json")
-    #
-    # with open(env_config_filepath, "w") as f:
-    #     json.dump(env_config, f, sort_keys=True, indent=4)
-    # with open(model_config_filepath, "w") as f:
-    #     json.dump(model_config, f, sort_keys=True, indent=4)
-    # with open(model_def_filepath, "w") as f:
-    #     json.dump(model_def, f, sort_keys=True, indent=4)
-
     print(f"Training directory set up at: {run_dir}")
     if args.checkpoint:
         print(f"Resuming training from checkpoint: {args.checkpoint}")
         print(f"Starting from epoch: {start_epoch}")
 
+    # Save configurations
+    env_config_path = os.path.join(run_dir, "environment.json")
+    model_config_path = os.path.join(run_dir, "model_config.json")
+    model_def_path = os.path.join(run_dir, "model_def.json")
+
+    with open(env_config_path, "w") as f:
+        json.dump(config["env_config"], f, indent=4)
+    with open(model_config_path, "w") as f:
+        json.dump(config["model_config"], f, indent=4)
+    with open(model_def_path, "w") as f:
+        json.dump(config["model_def"], f, indent=4)
+
     # Start training
     logger.info("Training the model...")
     diff_model_train(
-        config["env_config"],
-        config["model_config"],
-        config["model_def"],
+        env_config_path,
+        model_config_path,
+        model_def_path,
         num_gpus=1,
         amp=True,
         start_epoch=start_epoch,

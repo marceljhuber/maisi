@@ -33,68 +33,17 @@ from .utils import define_instance
 
 
 def load_filenames(data_list_path: str) -> list:
-    """
-    Load filenames from the JSON data list.
-
-    Args:
-        data_list_path (str): Path to the JSON data list file.
-
-    Returns:
-        list: List of filenames.
-    """
     with open(data_list_path, "r") as file:
         json_data = json.load(file)
     filenames_train = json_data["training"]
-    return [
-        _item["image"].replace(".nii.gz", "_emb.nii.gz") for _item in filenames_train
-    ]
+    return [_item["image"] for _item in filenames_train]
 
 
-def prepare_data(
-    train_files: list,
-    device: torch.device,
-    cache_rate: float,
-    num_workers: int = 2,
-    batch_size: int = 1,
-) -> DataLoader:
-    """
-    Prepare training data.
-
-    Args:
-        train_files (list): List of training files.
-        device (torch.device): Device to use for training.
-        cache_rate (float): Cache rate for dataset.
-        num_workers (int): Number of workers for data loading.
-        batch_size (int): Mini-batch size.
-
-    Returns:
-        DataLoader: Data loader for training.
-    """
-
-    def _load_data_from_file(file_path, key):
-        with open(file_path) as f:
-            return torch.FloatTensor(json.load(f)[key])
-
+def prepare_data(train_files, device, cache_rate, num_workers=2, batch_size=1):
     train_transforms = Compose(
         [
             monai.transforms.LoadImaged(keys=["image"]),
             monai.transforms.EnsureChannelFirstd(keys=["image"]),
-            monai.transforms.Lambdad(
-                keys="top_region_index",
-                func=lambda x: _load_data_from_file(x, "top_region_index"),
-            ),
-            monai.transforms.Lambdad(
-                keys="bottom_region_index",
-                func=lambda x: _load_data_from_file(x, "bottom_region_index"),
-            ),
-            monai.transforms.Lambdad(
-                keys="spacing", func=lambda x: _load_data_from_file(x, "spacing")
-            ),
-            monai.transforms.Lambdad(keys="top_region_index", func=lambda x: x * 1e2),
-            monai.transforms.Lambdad(
-                keys="bottom_region_index", func=lambda x: x * 1e2
-            ),
-            monai.transforms.Lambdad(keys="spacing", func=lambda x: x * 1e2),
         ]
     )
 
@@ -256,23 +205,24 @@ def train_one_epoch(
         images = train_data["image"].to(device)
         images = images * scale_factor
 
-        top_region_index_tensor = train_data["top_region_index"].to(device)
-        bottom_region_index_tensor = train_data["bottom_region_index"].to(device)
-        spacing_tensor = train_data["spacing"].to(device)
+        # top_region_index_tensor = train_data["top_region_index"].to(device)
+        # bottom_region_index_tensor = train_data["bottom_region_index"].to(device)
+        # spacing_tensor = train_data["spacing"].to(device)
 
         optimizer.zero_grad(set_to_none=True)
 
         with autocast("cuda", enabled=amp):
-            noise = torch.randn(
-                (
-                    num_images_per_batch,
-                    4,
-                    images.size(-3),
-                    images.size(-2),
-                    images.size(-1),
-                ),
-                device=device,
-            )
+            # noise = torch.randn(
+            #     (
+            #         num_images_per_batch,
+            #         # 4,
+            #         images.size(-3),
+            #         images.size(-2),
+            #         images.size(-1),
+            #     ),
+            #     device=device,
+            # )
+            noise = torch.randn_like(images, device=device)
 
             timesteps = torch.randint(
                 0, num_train_timesteps, (images.shape[0],), device=images.device
@@ -285,9 +235,9 @@ def train_one_epoch(
             noise_pred = unet(
                 x=noisy_latent,
                 timesteps=timesteps,
-                top_region_index_tensor=top_region_index_tensor,
-                bottom_region_index_tensor=bottom_region_index_tensor,
-                spacing_tensor=spacing_tensor,
+                # top_region_index_tensor=top_region_index_tensor,
+                # bottom_region_index_tensor=bottom_region_index_tensor,
+                # spacing_tensor=spacing_tensor,
             )
 
             loss = loss_pt(noise_pred.float(), noise.float())
@@ -365,6 +315,8 @@ def diff_model_train(
     model_def_path: str,
     num_gpus: int,
     amp: bool = True,
+    start_epoch=0,
+    wandb_run=None,
 ) -> None:
     """
     Main function to train a diffusion model.
@@ -444,7 +396,7 @@ def diff_model_train(
     torch.set_float32_matmul_precision("highest")
     logger.info("torch.set_float32_matmul_precision -> highest.")
 
-    for epoch in range(args.diffusion_unet_train["n_epochs"]):
+    for epoch in range(start_epoch, args.diffusion_unet_train["n_epochs"]):
         loss_torch = train_one_epoch(
             epoch,
             unet,
@@ -467,6 +419,9 @@ def diff_model_train(
         if torch.cuda.device_count() == 1 or local_rank == 0:
             loss_torch_epoch = loss_torch[0] / loss_torch[1]
             logger.info(f"epoch {epoch + 1} average loss: {loss_torch_epoch:.4f}.")
+
+            if wandb_run:
+                wandb_run.log({"loss": loss_torch_epoch}, step=epoch)
 
             save_checkpoint(
                 epoch,
