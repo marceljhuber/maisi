@@ -63,19 +63,6 @@ def log_metrics(losses, epoch, phase="train"):
     return {f"{phase}/{k}": v for k, v in losses.items()}
 
 
-def save_prediction_plot(original, prediction, epoch, save_dir):
-    """Save prediction plot and return wandb image."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-    ax1.imshow(original, cmap="gray")
-    ax1.set_title("Original")
-    ax2.imshow(prediction, cmap="gray")
-    ax2.set_title("Prediction")
-    save_path = Path(save_dir) / f"prediction_epoch_{epoch:03d}.png"
-    plt.savefig(save_path)
-    plt.close()
-    return {"predictions": wandb.Image(str(save_path))}
-
-
 def setup_training_dirs(config_name, checkpoint_path=None):
     """Sets up training directories and handles checkpoint loading."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -150,6 +137,9 @@ def main():
         config = json.load(f)
 
     config["env_config"]["trained_unet_path"] = config["main"]["trained_unet_path"]
+    config["env_config"]["trained_autoencoder_path"] = config["main"][
+        "trained_autoencoder_path"
+    ]
 
     # # Get list of image files
     # image_files = list_image_files(config["main"]["image_dir"])
@@ -219,6 +209,16 @@ def main():
         json.dump(config["model_config"], f, indent=4)
     with open(model_def_path, "w") as f:
         json.dump(config["model_def"], f, indent=4)
+
+    print(
+        "Config paths:",
+        f"env: {env_config_path} ({type(env_config_path)})",
+        f"model: {model_config_path} ({type(model_config_path)})",
+        f"def: {model_def_path} ({type(model_def_path)})",
+    )
+
+    # Also print config contents
+    print("Config contents:", config.keys())
 
     # Start training
     logger.info("Training the model...")

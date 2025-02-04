@@ -1,6 +1,6 @@
 {
     "main": {
-        "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/test/0",
+        "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/train",
         "trained_autoencoder_path": "./models/model_best.pt",
         "trained_unet_path": null
     },
@@ -34,8 +34,8 @@
     "model_def": {
         "spatial_dims": 2,
         "image_channels": 1,
-        "latent_channels": 1,
-        "mask_generation_latent_shape": [1, 256, 256],
+        "latent_channels": 4,
+        "mask_generation_latent_shape": [4, 64, 64],
         "autoencoder_def": {
             "_target_": "monai.apps.generation.maisi.networks.autoencoderkl_maisi.AutoencoderKlMaisi",
             "spatial_dims": "@spatial_dims",
