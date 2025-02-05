@@ -9,12 +9,12 @@
         "model_filename": "diff_unet_ckpt.pt",
         "output_dir": "./predictions",
         "output_prefix": "unet_2d",
-        "trained_autoencoder_path": "./models/autoencoder_epoch_20.pt",
-        "trained_diffusion_path": "./models/checkpoint_epoch_5.pt"
+        "trained_autoencoder_path": "./models/model_best.pt",
+        "trained_diffusion_path": "./models/model_epoch_66.pt"
     },
     "training": {
         "diffusion_unet_train": {
-            "batch_size": 4,
+            "batch_size": 1,
             "cache_rate": 0,
             "lr": 0.0001,
             "n_epochs": 1000
@@ -60,25 +60,25 @@
             "conditioning_embedding_in_channels": 8,
             "conditioning_embedding_num_channels": [8, 32, 64],
             "in_channels": "@latent_channels",
-            "num_channels": [64, 128, 256, 512],
-            "num_head_channels": [0, 0, 32, 32],
+            "num_channels": [64, 128, 256],
+            "num_head_channels": [0, 0, 32 ],
             "num_res_blocks": 2,
             "spatial_dims": "@spatial_dims",
             "use_flash_attention": true
         },
         "diffusion_unet_def": {
             "_target_": "monai.apps.generation.maisi.networks.diffusion_model_unet_maisi.DiffusionModelUNetMaisi",
-            "attention_levels": [false, false, true, true],
+            "spatial_dims": "@spatial_dims",
             "in_channels": "@latent_channels",
-            "include_bottom_region_index_input": false,
-            "include_spacing_input": false,
-            "include_top_region_index_input": false,
+            "out_channels": "@latent_channels",
             "num_channels": [64, 128, 256, 512],
+            "attention_levels": [false, false, true, true],
             "num_head_channels": [0, 0, 32, 32],
             "num_res_blocks": 2,
-            "out_channels": "@latent_channels",
-            "spatial_dims": "@spatial_dims",
-            "use_flash_attention": true
+            "use_flash_attention": true,
+            "include_top_region_index_input": false,
+            "include_bottom_region_index_input": false,
+            "include_spacing_input": false
         },
         "mask_generation_autoencoder_def": {
             "_target_": "monai.apps.generation.maisi.networks.autoencoderkl_maisi.AutoencoderKlMaisi",

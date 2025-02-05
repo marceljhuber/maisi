@@ -17,6 +17,16 @@ from monai.utils import set_determinism
 from scripts.sample import LDMSampler
 from scripts.utils import define_instance
 from scripts.utils_plot import find_label_center_loc, get_xyz_plot, show_image
+import argparse
+import json
+import os
+from pathlib import Path
+import numpy as np
+import torch
+from PIL import Image
+from torchvision import transforms
+from networks.autoencoderkl_maisi import AutoencoderKlMaisi
+from tqdm import tqdm
 
 print_config()
 ###################################################################################################
@@ -124,6 +134,34 @@ args = load_configs()
 ###################################################################################################
 
 
+def load_autoencoder(trained_autoencoder_path):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = {
+        "autoencoder": {
+            "spatial_dims": 2,
+            "in_channels": 1,
+            "out_channels": 1,
+            "latent_channels": 4,
+            "num_channels": [64, 128, 256],
+            "num_res_blocks": [2, 2, 2],
+            "norm_num_groups": 32,
+            "norm_eps": 1e-6,
+            "attention_levels": [False, False, False],
+            "with_encoder_nonlocal_attn": False,
+            "with_decoder_nonlocal_attn": False,
+            "use_checkpointing": False,
+            "use_convtranspose": False,
+            "norm_float16": True,
+            "num_splits": 1,
+            "dim_split": 1,
+        }
+    }
+    autoencoder = AutoencoderKlMaisi(**model["autoencoder"]).to(device)
+    checkpoint = torch.load(trained_autoencoder_path, map_location=device)
+    autoencoder.load_state_dict(checkpoint["autoencoder_state_dict"])
+    return autoencoder
+
+
 ###################################################################################################
 # INITIALIZATIONnoise_scheduler = define_instance(args, "noise_scheduler")
 mask_generation_noise_scheduler = define_instance(
@@ -132,9 +170,13 @@ mask_generation_noise_scheduler = define_instance(
 
 device = torch.device("cuda")
 
-autoencoder = define_instance(args, "autoencoder_def").to(device)
-checkpoint_autoencoder = torch.load(args.trained_autoencoder_path, weights_only=True)
-autoencoder.load_state_dict(checkpoint_autoencoder)
+# autoencoder = define_instance(args, "autoencoder_def").to(device)
+# checkpoint_autoencoder = torch.load(args.trained_autoencoder_path, weights_only=True)
+# autoencoder.load_state_dict(checkpoint_autoencoder)
+
+# Load model
+autoencoder = load_autoencoder(args.trained_autoencoder_path)
+autoencoder.eval()
 
 diffusion_unet = define_instance(args, "diffusion_unet_def").to(device)
 checkpoint_diffusion_unet = torch.load(args.trained_diffusion_path, weights_only=False)
@@ -143,49 +185,49 @@ diffusion_unet.load_state_dict(
 )
 scale_factor = checkpoint_diffusion_unet["scale_factor"].to(device)
 
-controlnet = define_instance(args, "controlnet_def").to(device)
-checkpoint_controlnet = torch.load(args.trained_controlnet_path, weights_only=False)
-monai.networks.utils.copy_model_state(controlnet, diffusion_unet.state_dict())
-controlnet.load_state_dict(checkpoint_controlnet["controlnet_state_dict"], strict=True)
+# controlnet = define_instance(args, "controlnet_def").to(device)
+# checkpoint_controlnet = torch.load(args.trained_controlnet_path, weights_only=False)
+# monai.networks.utils.copy_model_state(controlnet, diffusion_unet.state_dict())
+# controlnet.load_state_dict(checkpoint_controlnet["controlnet_state_dict"], strict=True)
 
-mask_generation_autoencoder = define_instance(
-    args, "mask_generation_autoencoder_def"
-).to(device)
-checkpoint_mask_generation_autoencoder = torch.load(
-    args.trained_mask_generation_autoencoder_path, weights_only=True
-)
-mask_generation_autoencoder.load_state_dict(checkpoint_mask_generation_autoencoder)
-
-mask_generation_diffusion_unet = define_instance(
-    args, "mask_generation_diffusion_def"
-).to(device)
-checkpoint_mask_generation_diffusion_unet = torch.load(
-    args.trained_mask_generation_diffusion_path, weights_only=True
-)
-mask_generation_diffusion_unet.load_state_dict(
-    checkpoint_mask_generation_diffusion_unet["unet_state_dict"]
-)
-mask_generation_scale_factor = checkpoint_mask_generation_diffusion_unet["scale_factor"]
+# mask_generation_autoencoder = define_instance(
+#     args, "mask_generation_autoencoder_def"
+# ).to(device)
+# checkpoint_mask_generation_autoencoder = torch.load(
+#     args.trained_mask_generation_autoencoder_path, weights_only=True
+# )
+# mask_generation_autoencoder.load_state_dict(checkpoint_mask_generation_autoencoder)
+#
+# mask_generation_diffusion_unet = define_instance(
+#     args, "mask_generation_diffusion_def"
+# ).to(device)
+# checkpoint_mask_generation_diffusion_unet = torch.load(
+#     args.trained_mask_generation_diffusion_path, weights_only=True
+# )
+# mask_generation_diffusion_unet.load_state_dict(
+#     checkpoint_mask_generation_diffusion_unet["unet_state_dict"]
+# )
+# mask_generation_scale_factor = checkpoint_mask_generation_diffusion_unet["scale_factor"]
 
 print("All the trained model weights have been loaded.")
 ###################################################################################################
-noise_scheduler = define_instance(args, "noise_scheduler")
-mask_generation_noise_scheduler = define_instance(
-    args, "mask_generation_noise_scheduler"
-)
-
-device = torch.device("cuda")
-
-autoencoder = define_instance(args, "autoencoder_def").to(device)
-checkpoint_autoencoder = torch.load(args.trained_autoencoder_path, weights_only=True)
-autoencoder.load_state_dict(checkpoint_autoencoder)
-
-diffusion_unet = define_instance(args, "diffusion_unet_def").to(device)
-checkpoint_diffusion_unet = torch.load(args.trained_diffusion_path, weights_only=False)
-diffusion_unet.load_state_dict(
-    checkpoint_diffusion_unet["unet_state_dict"], strict=True
-)
-scale_factor = checkpoint_diffusion_unet["scale_factor"].to(device)
+# noise_scheduler = define_instance(args, "noise_scheduler")
+# mask_generation_noise_scheduler = define_instance(
+#     args, "mask_generation_noise_scheduler"
+# )
+#
+# device = torch.device("cuda")
+#
+# autoencoder = define_instance(args, "autoencoder_def").to(device)
+# checkpoint_autoencoder = torch.load(args.trained_autoencoder_path, weights_only=True)
+# autoencoder.load_state_dict(checkpoint_autoencoder)
+#
+# diffusion_unet = define_instance(args, "diffusion_unet_def").to(device)
+# checkpoint_diffusion_unet = torch.load(args.trained_diffusion_path, weights_only=False)
+# diffusion_unet.load_state_dict(
+#     checkpoint_diffusion_unet["unet_state_dict"], strict=True
+# )
+# scale_factor = checkpoint_diffusion_unet["scale_factor"].to(device)
 
 # controlnet = define_instance(args, "controlnet_def").to(device)
 # checkpoint_controlnet = torch.load(args.trained_controlnet_path, weights_only=False)
@@ -201,6 +243,9 @@ scale_factor = checkpoint_diffusion_unet["scale_factor"].to(device)
 # mask_generation_diffusion_unet.load_state_dict(checkpoint_mask_generation_diffusion_unet["unet_state_dict"])
 # mask_generation_scale_factor = checkpoint_mask_generation_diffusion_unet["scale_factor"]
 
+latent_shape = [4, 64, 64]
+args.output_size = [256, 256]
+
 print("All the trained model weights have been loaded.")
 ###################################################################################################
 
@@ -209,28 +254,28 @@ print("All the trained model weights have been loaded.")
 # LDM SAMPLER
 ###################################################################################################
 ldm_sampler = LDMSampler(
-    args.body_region,
-    args.anatomy_list,
-    args.all_mask_files_json,
-    args.all_anatomy_size_conditions_json,
-    args.all_mask_files_base_dir,
-    args.label_dict_json,
-    args.label_dict_remap_json,
+    # args.body_region,
+    ####args.anatomy_list,
+    # args.all_mask_files_json,
+    # args.all_anatomy_size_conditions_json,
+    # args.all_mask_files_base_dir,
+    # args.label_dict_json,
+    # args.label_dict_remap_json,
     autoencoder,
     diffusion_unet,
-    controlnet,
-    noise_scheduler,
+    # controlnet,
+    # noise_scheduler,
     scale_factor,
-    mask_generation_autoencoder,
-    mask_generation_diffusion_unet,
-    mask_generation_scale_factor,
-    mask_generation_noise_scheduler,
+    # mask_generation_autoencoder,
+    # mask_generation_diffusion_unet,
+    # mask_generation_scale_factor,
+    # mask_generation_noise_scheduler,
     device,
     latent_shape,
-    args.mask_generation_latent_shape,
+    # args.mask_generation_latent_shape,
     args.output_size,
     args.output_dir,
-    args.controllable_anatomy_size,
+    # args.controllable_anatomy_size,
     image_output_ext=args.image_output_ext,
     label_output_ext=args.label_output_ext,
     spacing=args.spacing,
