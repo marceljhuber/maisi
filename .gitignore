@@ -2,7 +2,7 @@
 /wandb/
 *.pt
 /runs/
-/configs_nv/
+/backup/configs_nv/
 /backup/
 /temp_work_dir/
 *.png

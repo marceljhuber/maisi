@@ -141,37 +141,6 @@ def main():
         "trained_autoencoder_path"
     ]
 
-    # # Get list of image files
-    # image_files = list_image_files(config["main"]["image_dir"])
-    # train_imgs, val_imgs = split_train_val_by_patient(image_files)
-    #
-    # # Create training dataset structure
-    # work_dir = os.path.abspath("./temp_work_dir")
-    # if not os.path.isdir(work_dir):
-    #     os.makedirs(work_dir)
-    #
-    # dataroot_dir = os.path.join(work_dir, "processed_data")
-    # if not os.path.isdir(dataroot_dir):
-    #     os.makedirs(dataroot_dir)
-    #
-    # # Process images
-    # processed_train_imgs = []
-    # processed_val_imgs = []
-    #
-    # for img_path in train_imgs:
-    #     processed_path = process_image(img_path, dataroot_dir, "train")
-    #     processed_train_imgs.append({"image": processed_path})
-    #
-    # for img_path in val_imgs:
-    #     processed_path = process_image(img_path, dataroot_dir, "val")
-    #     processed_val_imgs.append({"image": processed_path})
-    #
-    # # Create datalist
-    # datalist = {"training": processed_train_imgs, "validation": processed_val_imgs}
-    # datalist_file = os.path.join(work_dir, "datalist.json")
-    # with open(datalist_file, "w") as f:
-    #     json.dump(datalist, f)
-
     # Get list of image files directly
     image_files = list_image_files(config["main"]["image_dir"])
     train_imgs, val_imgs = split_train_val_by_patient(image_files)
@@ -200,25 +169,6 @@ def main():
     if args.checkpoint:
         print(f"Resuming training from checkpoint: {args.checkpoint}")
         print(f"Starting from epoch: {start_epoch}")
-
-    # # Save configurations
-    # env_config_path = os.path.join(run_dir, "environment.json")
-    # model_config_path = os.path.join(run_dir, "model_config.json")
-    # vae_def_path = os.path.join(run_dir, "vae_def.json")
-    #
-    # with open(env_config_path, "w") as f:
-    #     json.dump(config["env_config"], f, indent=4)
-    # with open(model_config_path, "w") as f:
-    #     json.dump(config["model_config"], f, indent=4)
-    # with open(config, "w") as f:
-    #     json.dump(config, f, indent=4)
-    # #
-    # print(
-    #     "Config paths:",
-    #     f"env: {env_config_path} ({type(env_config_path)})",
-    #     f"model: {model_config_path} ({type(model_config_path)})",
-    #     f"def: {vae_def_path} ({type(vae_def_path)})",
-    # )
 
     # Also print config contents
     print("Config contents:", config.keys())
