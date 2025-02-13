@@ -324,51 +324,10 @@ def ldm_conditional_sample_one_image(
         # project output to [-1000, 1000]
         synthetic_images = synthetic_images * (a_max - a_min) + a_min
         # regularize background intensities
-        synthetic_images = crop_img_body_mask(synthetic_images, combine_label)
+        # synthetic_images = crop_img_body_mask(synthetic_images, combine_label)
         torch.cuda.empty_cache()
 
     return synthetic_images, combine_label
-
-
-def filter_mask_with_organs(combine_label, anatomy_list):
-    """
-    Filter a mask to only include specified organs.
-
-    Args:
-        combine_label (torch.Tensor): The input mask.
-        anatomy_list (list): List of organ labels to keep.
-
-    Returns:
-        torch.Tensor: The filtered mask.
-    """
-    # final output mask file has shape of output_size, contains labels in anatomy_list
-    # it is already interpolated to target size
-    combine_label = combine_label.long()
-    # filter out the organs that are not in anatomy_list
-    for i in range(len(anatomy_list)):
-        organ = anatomy_list[i]
-        # replace it with a negative value so it will get mixed
-        combine_label[combine_label == organ] = -(i + 1)
-    # zero-out voxels with value not in anatomy_list
-    combine_label[combine_label > 0] = 0
-    # output positive values
-    combine_label = -combine_label
-    return combine_label
-
-
-def crop_img_body_mask(synthetic_images, combine_label):
-    """
-    Crop the synthetic image using a body mask.
-
-    Args:
-        synthetic_images (torch.Tensor): The synthetic images.
-        combine_label (torch.Tensor): The body mask.
-
-    Returns:
-        torch.Tensor: The cropped synthetic images.
-    """
-    synthetic_images[combine_label == 0] = -1000
-    return synthetic_images
 
 
 def check_input(
@@ -566,41 +525,18 @@ class LDMSampler:
         if random_seed is not None:
             set_determinism(seed=random_seed)
 
-        # with open(label_dict_json, "r") as f:
-        #     label_dict = json.load(f)
-        # self.all_anatomy_size_condtions_json = all_anatomy_size_condtions_json
-
         # intialize variables
-        # self.body_region = body_region
-        # self.anatomy_list = [label_dict[organ] for organ in anatomy_list]
-        # self.all_mask_files_json = all_mask_files_json
         self.data_root = all_mask_files_base_dir
-        # self.label_dict_remap_json = label_dict_remap_json
         self.autoencoder = autoencoder
         self.diffusion_unet = diffusion_unet
         # self.controlnet = controlnet
         self.noise_scheduler = noise_scheduler
         self.scale_factor = scale_factor
-        # self.mask_generation_autoencoder = mask_generation_autoencoder
-        # self.mask_generation_diffusion_unet = mask_generation_diffusion_unet
-        # self.mask_generation_scale_factor = mask_generation_scale_factor
-        # self.mask_generation_noise_scheduler = mask_generation_noise_scheduler
         self.device = device
         self.latent_shape = latent_shape
-        # self.mask_generation_latent_shape = mask_generation_latent_shape
         # self.output_size = output_size
         self.output_dir = output_dir
         self.noise_factor = 1.0
-        # self.controllable_anatomy_size = controllable_anatomy_size
-        # if len(self.controllable_anatomy_size):
-        #     logging.info(
-        #         "controllable_anatomy_size is given, mask generation is triggered!"
-        #     )
-        #     # overwrite the anatomy_list by given organs in self.controllable_anatomy_size
-        #     self.anatomy_list = [
-        #         label_dict[organ_and_size[0]]
-        #         for organ_and_size in self.controllable_anatomy_size
-        #     ]
         self.image_output_ext = image_output_ext
         # self.label_output_ext = label_output_ext
         # Set the default value for number of inference steps to 1000
@@ -613,76 +549,19 @@ class LDMSampler:
             else 1000
         )
 
-        # if any(size % 16 != 0 for size in autoencoder_sliding_window_infer_size):
-        #     raise ValueError(
-        #         f"autoencoder_sliding_window_infer_size must be divisible by 16.\n Got {autoencoder_sliding_window_infer_size}"
-        #     )
-        # if not (0 <= autoencoder_sliding_window_infer_overlap <= 1):
-        #     raise ValueError(
-        #         f"Value of autoencoder_sliding_window_infer_overlap must be between 0 and 1.\n Got {autoencoder_sliding_window_infer_overlap}"
-        #     )
-        # self.autoencoder_sliding_window_infer_size = (
-        #     autoencoder_sliding_window_infer_size
-        # )
-        # self.autoencoder_sliding_window_infer_overlap = (
-        #     autoencoder_sliding_window_infer_overlap
-        # )
-
         # quality check args
         self.max_try_time = (
             5  # if not pass quality check, will try self.max_try_time times
         )
         with open(real_img_median_statistics, "r") as json_file:
             self.median_statistics = json.load(json_file)
-        # self.label_int_dict = {
-        #     "liver": [1],
-        #     "spleen": [3],
-        #     "pancreas": [4],
-        #     "kidney": [5, 14],
-        #     "lung": [28, 29, 30, 31, 31],
-        #     "brain": [22],
-        #     "hepatic tumor": [26],
-        #     "bone lesion": [128],
-        #     "lung tumor": [23],
-        #     "colon cancer primaries": [27],
-        #     "pancreatic tumor": [24],
-        #     "bone": list(range(33, 57)) + list(range(63, 98)) + [120, 122, 127],
-        # }
 
         # networks
         self.autoencoder.eval()
         self.diffusion_unet.eval()
         # self.controlnet.eval()
-        # self.mask_generation_autoencoder.eval()
-        # self.mask_generation_diffusion_unet.eval()
 
         self.spacing = spacing
-
-        # self.val_transforms = Compose(
-        #     [
-        #         monai.transforms.LoadImaged(keys=["pseudo_label"]),
-        #         monai.transforms.EnsureChannelFirstd(keys=["pseudo_label"]),
-        #         monai.transforms.Orientationd(keys=["pseudo_label"], axcodes="RAS"),
-        #         monai.transforms.EnsureTyped(keys=["pseudo_label"], dtype=torch.uint8),
-        #         monai.transforms.Lambdad(
-        #             keys="top_region_index", func=lambda x: torch.FloatTensor(x)
-        #         ),
-        #         monai.transforms.Lambdad(
-        #             keys="bottom_region_index", func=lambda x: torch.FloatTensor(x)
-        #         ),
-        #         monai.transforms.Lambdad(
-        #             keys="spacing", func=lambda x: torch.FloatTensor(x)
-        #         ),
-        #         monai.transforms.Lambdad(
-        #             keys="top_region_index", func=lambda x: x * 1e2
-        #         ),
-        #         monai.transforms.Lambdad(
-        #             keys="bottom_region_index", func=lambda x: x * 1e2
-        #         ),
-        #         monai.transforms.Lambdad(keys="spacing", func=lambda x: x * 1e2),
-        #     ]
-        # )
-        # logging.info("LDM sampler initialized.")
 
         self.val_transforms = Compose(
             [
@@ -721,52 +600,31 @@ class LDMSampler:
                     # Sample latent using diffusion model
                     synthetic_image = self.sample_one_image()
                     print(f"synthetic_image.shape:", synthetic_image.shape)
+                    # Save image
+                    output_postfix = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
-                    # Quality check for the generated image
-                    # pass_quality_check = self.quality_check(
-                    #     synthetic_image.cpu().detach().numpy()
-                    # )
-                    pass_quality_check = True
+                    # Save the generated image
+                    img_saver = SaveImage(
+                        output_dir=self.output_dir,
+                        output_postfix=output_postfix + "_image",
+                        output_ext=self.image_output_ext,
+                        separate_folder=False,
+                    )
+                    img_saver(synthetic_image[0])
 
-                    if pass_quality_check or try_time > self.max_try_time:
-                        # Save image
-                        output_postfix = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    # Get the full path of saved image
+                    synthetic_image_filename = os.path.join(
+                        self.output_dir,
+                        "sample_" + output_postfix + "_image" + self.image_output_ext,
+                    )
 
-                        # # Create MetaTensor for saving
-                        # synthetic_image = MetaTensor(
-                        #     synthetic_image, meta={"filename_or_obj": "sample.nii.gz"}
-                        # )
+                    output_filenames.append(synthetic_image_filename)
+                    to_generate = False
 
-                        # Save the generated image
-                        img_saver = SaveImage(
-                            output_dir=self.output_dir,
-                            output_postfix=output_postfix + "_image",
-                            output_ext=self.image_output_ext,
-                            separate_folder=False,
-                        )
-                        img_saver(synthetic_image[0])
-
-                        # Get the full path of saved image
-                        synthetic_image_filename = os.path.join(
-                            self.output_dir,
-                            "sample_"
-                            + output_postfix
-                            + "_image"
-                            + self.image_output_ext,
-                        )
-
-                        output_filenames.append(synthetic_image_filename)
-                        to_generate = False
-
-                        end_time = time.time()
-                        logging.info(
-                            f"---- Image generation time: {end_time - start_time} seconds ----"
-                        )
-                    else:
-                        logging.info(
-                            "Generated image did not pass quality check, will re-generate."
-                        )
-                        try_time += 1
+                    end_time = time.time()
+                    logging.info(
+                        f"---- Image generation time: {end_time - start_time} seconds ----"
+                    )
 
                 except Exception as e:
                     logging.error(f"Error during image generation: {str(e)}")

@@ -51,6 +51,9 @@ def visualize_2d(image):
     if len(image.shape) == 3:
         image = image.squeeze(0)
 
+    # Denormalize from [-1, 1] to [0, 1]
+    image = (image + 1) / 2
+
     return image  # Should now be [H, W]
 
 

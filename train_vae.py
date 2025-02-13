@@ -14,7 +14,6 @@ import wandb
 from PIL import Image
 from monai.config import print_config
 from monai.data import DataLoader
-from monai.inferers.inferer import SimpleInferer, SlidingWindowInferer
 from monai.losses.adversarial_loss import PatchAdversarialLoss
 from monai.losses.perceptual import PerceptualLoss
 from monai.networks.nets import PatchDiscriminator
@@ -90,7 +89,6 @@ class GrayscaleDataset(Dataset):
 
 
 def setup_transforms():
-    """Setup data transforms for training and validation."""
     train_transform = transforms.Compose(
         [
             transforms.RandomResizedCrop(256, scale=(0.8, 1.0)),
@@ -99,7 +97,7 @@ def setup_transforms():
             transforms.ColorJitter(brightness=0.2, contrast=0.2),
             transforms.ToTensor(),
             SpeckleNoise(0.1),
-            transforms.Normalize(mean=[0.2100], std=[0.0300]),
+            transforms.Lambda(lambda x: 2 * x - 1),  # Scale to [-1, 1]
         ]
     )
 
@@ -107,7 +105,7 @@ def setup_transforms():
         [
             transforms.Resize((256, 256)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.2100], std=[0.0300]),
+            transforms.Lambda(lambda x: 2 * x - 1),  # Scale to [-1, 1]
         ]
     )
 
@@ -378,7 +376,7 @@ def main():
 
     # Initialize wandb
     wandb.init(
-        project="vae-gan-training",
+        project="vae-gan-training-",
         config=config,
         name=f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
     )
@@ -397,6 +395,7 @@ def main():
     # Setup data
     image_files = list_image_files(config["data"]["image_dir"])
     train_images, val_images = split_train_val_by_patient(image_files)
+    print(f"Found {len(train_images)} train images.")
     train_transform, val_transform = setup_transforms()
     train_loader, val_loader = setup_dataloaders(
         train_images, val_images, train_transform, val_transform, config
