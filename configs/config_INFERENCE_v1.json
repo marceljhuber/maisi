@@ -9,8 +9,9 @@
         "model_filename": "diff_unet_ckpt.pt",
         "output_dir": "./predictions",
         "output_prefix": "unet_2d",
+        "real_img_median_statistics": "./configs/image_median_statistics.json",
         "trained_autoencoder_path": "./models/model_best.pt",
-        "trained_diffusion_path": "./models/model_epoch_66.pt"
+        "trained_diffusion_path": "./models/3_model_epoch_206.pt"
     },
     "training": {
         "diffusion_unet_train": {
@@ -25,9 +26,11 @@
         "diffusion_unet_inference": {
             "bottom_region_index": [0, 0, 1, 0],
             "dim": [256, 256, 128],
+            "image_output_ext": ".png",
+            "num_output_samples": 4,
             "num_inference_steps": 10,
             "random_seed": 42,
-            "spacing": [1.0, 1.0, 0.75],
+            "spacing": [1.0, 1.0, 1.0],
             "top_region_index": [0, 1, 0, 0]
         }
     },

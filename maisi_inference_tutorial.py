@@ -163,10 +163,11 @@ def load_autoencoder(trained_autoencoder_path):
 
 
 ###################################################################################################
-# INITIALIZATIONnoise_scheduler = define_instance(args, "noise_scheduler")
-mask_generation_noise_scheduler = define_instance(
-    args, "mask_generation_noise_scheduler"
-)
+# INITIALIZATION
+noise_scheduler = define_instance(args, "noise_scheduler")
+# mask_generation_noise_scheduler = define_instance(
+#     args, "mask_generation_noise_scheduler"
+# )
 
 device = torch.device("cuda")
 
@@ -253,37 +254,71 @@ print("All the trained model weights have been loaded.")
 ###################################################################################################
 # LDM SAMPLER
 ###################################################################################################
+# ldm_sampler = LDMSampler(
+#     args.body_region,
+#     args.anatomy_list,
+#     args.all_mask_files_json,
+#     args.all_anatomy_size_conditions_json,
+#     args.all_mask_files_base_dir,
+#     args.label_dict_json,
+#     args.label_dict_remap_json,
+#     autoencoder,
+#     diffusion_unet,
+#     controlnet,
+#     noise_scheduler,
+#     scale_factor,
+#     mask_generation_autoencoder,
+#     mask_generation_diffusion_unet,
+#     mask_generation_scale_factor,
+#     mask_generation_noise_scheduler,
+#     device,
+#     latent_shape,
+#     args.mask_generation_latent_shape,
+#     args.output_size,
+#     args.output_dir,
+#     args.controllable_anatomy_size,
+#     image_output_ext=None,
+#     label_output_ext=None,
+#     spacing=None,
+#     num_inference_steps=args.num_inference_steps,
+#     mask_generation_num_inference_steps=None,
+#     random_seed=args.random_seed,
+#     autoencoder_sliding_window_infer_size=None,
+#     autoencoder_sliding_window_infer_overlap=None,
+# )
+print("image_output_ext:", args.image_output_ext)
 ldm_sampler = LDMSampler(
-    # args.body_region,
-    ####args.anatomy_list,
-    # args.all_mask_files_json,
-    # args.all_anatomy_size_conditions_json,
-    # args.all_mask_files_base_dir,
-    # args.label_dict_json,
-    # args.label_dict_remap_json,
-    autoencoder,
-    diffusion_unet,
-    # controlnet,
-    # noise_scheduler,
-    scale_factor,
-    # mask_generation_autoencoder,
-    # mask_generation_diffusion_unet,
-    # mask_generation_scale_factor,
-    # mask_generation_noise_scheduler,
-    device,
-    latent_shape,
-    # args.mask_generation_latent_shape,
-    args.output_size,
-    args.output_dir,
-    # args.controllable_anatomy_size,
+    body_region=None,
+    anatomy_list=None,
+    all_mask_files_json=None,
+    all_anatomy_size_condtions_json=None,
+    all_mask_files_base_dir=None,
+    label_dict_json=None,
+    label_dict_remap_json=None,
+    autoencoder=autoencoder,
+    diffusion_unet=diffusion_unet,
+    controlnet=None,
+    noise_scheduler=noise_scheduler,
+    scale_factor=scale_factor,
+    mask_generation_autoencoder=None,
+    mask_generation_diffusion_unet=None,
+    mask_generation_scale_factor=None,
+    mask_generation_noise_scheduler=None,
+    device=device,
+    latent_shape=latent_shape,
+    mask_generation_latent_shape=None,
+    output_size=None,
+    output_dir=args.output_dir,
+    controllable_anatomy_size=None,
     image_output_ext=args.image_output_ext,
-    label_output_ext=args.label_output_ext,
-    spacing=args.spacing,
-    num_inference_steps=args.num_inference_steps,
-    mask_generation_num_inference_steps=args.mask_generation_num_inference_steps,
-    random_seed=args.random_seed,
-    autoencoder_sliding_window_infer_size=args.autoencoder_sliding_window_infer_size,
-    autoencoder_sliding_window_infer_overlap=args.autoencoder_sliding_window_infer_overlap,
+    label_output_ext=None,
+    real_img_median_statistics=args.real_img_median_statistics,
+    spacing=None,
+    num_inference_steps=None,
+    mask_generation_num_inference_steps=None,
+    random_seed=None,
+    autoencoder_sliding_window_infer_size=None,
+    autoencoder_sliding_window_infer_overlap=None,
 )
 ###################################################################################################
 
@@ -300,43 +335,44 @@ print("MAISI image/mask generation finished")
 ###################################################################################################
 # VISUALIZE THE RESULTS
 ###################################################################################################
-visualize_image_filename = output_filenames[0][0]
-visualize_mask_filename = output_filenames[0][1]
-print(f"Visualizing {visualize_image_filename} and {visualize_mask_filename}...")
+# print(output_filenames)
+# visualize_image_filename = output_filenames[0][0]
+# visualize_mask_filename = output_filenames[0][1]
+# print(f"Visualizing {visualize_image_filename} and {visualize_mask_filename}...")
 
 # load image/mask pairs
-loader = LoadImage(image_only=True, ensure_channel_first=True)
-orientation = Orientation(axcodes="RAS")
-image_volume = orientation(loader(visualize_image_filename))
-mask_volume = orientation(loader(visualize_mask_filename)).to(torch.uint8)
-
-# visualize for CT HU intensity between [-200, 500]
-image_volume = torch.clip(image_volume, -200, 500)
-image_volume = image_volume - torch.min(image_volume)
-image_volume = image_volume / torch.max(image_volume)
-
-# create a random color map for mask visualization
-colorize = torch.clip(
-    torch.cat([torch.zeros(3, 1, 1, 1), torch.randn(3, 200, 1, 1)], 1), 0, 1
-)
-target_class_index = 1
-
-# find center voxel location for 2D slice visualization
-center_loc_axis = find_label_center_loc(
-    torch.flip(mask_volume[0, ...] == target_class_index, [-3, -2, -1])
-)
-
-# visualization
-vis_mask = get_xyz_plot(
-    mask_volume,
-    center_loc_axis,
-    mask_bool=True,
-    n_label=201,
-    colorize=colorize,
-    target_class_index=target_class_index,
-)
-show_image(vis_mask, title="mask")
-
-vis_image = get_xyz_plot(image_volume, center_loc_axis, mask_bool=False)
-show_image(vis_image, title="image")
+# loader = LoadImage(image_only=True, ensure_channel_first=True)
+# orientation = Orientation(axcodes="RAS")
+# image_volume = orientation(loader(visualize_image_filename))
+# mask_volume = orientation(loader(visualize_mask_filename)).to(torch.uint8)
+#
+# # visualize for CT HU intensity between [-200, 500]
+# image_volume = torch.clip(image_volume, -200, 500)
+# image_volume = image_volume - torch.min(image_volume)
+# image_volume = image_volume / torch.max(image_volume)
+#
+# # create a random color map for mask visualization
+# colorize = torch.clip(
+#     torch.cat([torch.zeros(3, 1, 1, 1), torch.randn(3, 200, 1, 1)], 1), 0, 1
+# )
+# target_class_index = 1
+#
+# # find center voxel location for 2D slice visualization
+# center_loc_axis = find_label_center_loc(
+#     torch.flip(mask_volume[0, ...] == target_class_index, [-3, -2, -1])
+# )
+#
+# # visualization
+# vis_mask = get_xyz_plot(
+#     mask_volume,
+#     center_loc_axis,
+#     mask_bool=True,
+#     n_label=201,
+#     colorize=colorize,
+#     target_class_index=target_class_index,
+# )
+# show_image(vis_mask, title="mask")
+#
+# vis_image = get_xyz_plot(image_volume, center_loc_axis, mask_bool=False)
+# show_image(vis_image, title="image")
 ###################################################################################################
