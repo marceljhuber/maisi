@@ -11,7 +11,7 @@
         "output_prefix": "unet_2d",
         "real_img_median_statistics": "./configs/image_median_statistics.json",
         "trained_autoencoder_path": "./models/model_best.pt",
-        "trained_diffusion_path": "./models/DIFF1_model_epoch_15.pt"
+        "trained_diffusion_path": "./models/207/model_epoch_2.pt"
     },
     "training": {
         "diffusion_unet_train": {

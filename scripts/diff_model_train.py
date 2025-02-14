@@ -12,16 +12,22 @@ from monai.transforms import Compose
 from monai.utils import first
 from torch.amp import GradScaler, autocast
 from tqdm import tqdm
+import wandb
 
 from scripts.diff_model_setting import setup_logging
 from scripts.utils import define_instance
+from scripts.sample import ldm_conditional_sample_one_image
+import os
+from networks.autoencoderkl_maisi import AutoencoderKlMaisi
 
 
+########################################################################################################################
 def load_latents(latents_dir: str) -> list:
     latent_files = sorted(Path(latents_dir).glob("*_latent.pt"))
     return [{"image": str(f)} for f in latent_files]
 
 
+########################################################################################################################
 def load_config(config_path):
     if isinstance(config_path, dict):
         config = config_path
@@ -38,6 +44,7 @@ def load_config(config_path):
     return argparse.Namespace(**merged_config)
 
 
+########################################################################################################################
 def prepare_data(train_files, device, cache_rate, num_workers=2, batch_size=1):
     train_transforms = Compose(
         [
@@ -56,6 +63,7 @@ def prepare_data(train_files, device, cache_rate, num_workers=2, batch_size=1):
     return DataLoader(train_ds, num_workers=6, batch_size=batch_size, shuffle=True)
 
 
+########################################################################################################################
 def load_unet(
     args: argparse.Namespace, device: torch.device, logger: logging.Logger
 ) -> torch.nn.Module:
@@ -71,6 +79,7 @@ def load_unet(
     return unet
 
 
+########################################################################################################################
 def calculate_scale_factor(
     train_loader: DataLoader, device: torch.device, logger: logging.Logger
 ) -> torch.Tensor:
@@ -81,10 +90,12 @@ def calculate_scale_factor(
     return scale_factor
 
 
+########################################################################################################################
 def create_optimizer(model: torch.nn.Module, lr: float) -> torch.optim.Optimizer:
     return torch.optim.Adam(params=model.parameters(), lr=lr)
 
 
+########################################################################################################################
 def create_lr_scheduler(
     optimizer: torch.optim.Optimizer, total_steps: int
 ) -> torch.optim.lr_scheduler.PolynomialLR:
@@ -93,6 +104,7 @@ def create_lr_scheduler(
     )
 
 
+########################################################################################################################
 def train_one_epoch(
     epoch,
     unet,
@@ -148,6 +160,7 @@ def train_one_epoch(
     return loss_torch
 
 
+########################################################################################################################
 def save_checkpoint(
     epoch,
     unet,
@@ -176,6 +189,7 @@ def save_checkpoint(
     # print(f"Saving to: ", save_path / f"model_epoch_{epoch + 1}.pt")
 
 
+########################################################################################################################
 def log_metrics(epoch, loss_torch_epoch, optimizer, wandb_run):
     metrics = {
         "train/loss": loss_torch_epoch,
@@ -185,6 +199,149 @@ def log_metrics(epoch, loss_torch_epoch, optimizer, wandb_run):
     wandb_run.log(metrics)
 
 
+########################################################################################################################
+def generate_validation_images(
+    autoencoder,
+    diffusion_unet,
+    noise_scheduler,
+    scale_factor,
+    device,
+    latent_shape,
+    output_dir,
+    num_images=2,
+    num_inference_steps=50,
+):
+    """
+    Generate a fixed set of validation images using predefined seeds.
+
+    Args:
+        autoencoder: The trained autoencoder model
+        diffusion_unet: The trained diffusion UNet model
+        noise_scheduler: The noise scheduler
+        scale_factor: Scaling factor for the latents
+        device: The device to run inference on
+        latent_shape: Shape of the latent space
+        output_dir: Directory to save the generated images
+        num_images: Number of images to generate (default: 20)
+        num_inference_steps: Number of diffusion steps (default: 1000)
+    """
+    import os
+    from datetime import datetime
+    import torch
+    from monai.transforms import SaveImage
+
+    # Store current RNG state
+    rng_state = torch.get_rng_state()
+    cuda_rng_state = torch.cuda.get_rng_state()
+
+    # Create validation directory
+    val_dir = os.path.join(output_dir)
+    os.makedirs(val_dir, exist_ok=True)
+
+    # Set fixed seeds for validation
+    base_seed = 42
+    validation_seeds = [base_seed + i for i in range(num_images)]
+
+    generated_images = []
+
+    for seed_idx, seed in enumerate(validation_seeds):
+        # Set seed for reproducibility
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+
+        try:
+            # Generate image using the ldm_conditional_sample_one_image function
+            synthetic_image = ldm_conditional_sample_one_image(
+                autoencoder=autoencoder,
+                diffusion_unet=diffusion_unet,
+                noise_scheduler=noise_scheduler,
+                scale_factor=scale_factor,
+                device=device,
+                latent_shape=latent_shape,
+                noise_factor=1.0,
+                num_inference_steps=num_inference_steps,
+            )
+
+            # Denormalize from [-1,1] to [0,1]
+            synthetic_image = (synthetic_image + 1) / 2.0
+
+            # Convert to uint8 range [0,255]
+            synthetic_image = (synthetic_image * 255).type(torch.uint8)
+
+            # Save the generated image
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            img_saver = SaveImage(
+                output_dir=val_dir,
+                output_postfix=f"val_{seed_idx:02d}_seed{seed}_{timestamp}",
+                output_ext=".png",
+                separate_folder=False,
+            )
+            img_saver(synthetic_image[0])
+
+            # For return value, keep in normalized form
+            generated_images.append((synthetic_image.float() / 255) * 2 - 1)
+
+        except Exception as e:
+            print(f"Error generating validation image with seed {seed}: {str(e)}")
+            continue
+
+    # Restore original RNG state
+    torch.set_rng_state(rng_state)
+    torch.cuda.set_rng_state(cuda_rng_state)
+
+    return generated_images
+
+
+########################################################################################################################
+def save_validation_images_after_epoch(
+    epoch, run_dir, models_dict, config, wandb_run=None
+):
+    """
+    Generate and save validation images after each epoch.
+
+    Args:
+        epoch: Current epoch number
+        run_dir: Directory for the current training run
+        models_dict: Dictionary containing the models
+        config: Configuration dictionary
+        wandb_run: Optional wandb run object for logging
+    """
+    val_dir = os.path.join(run_dir, "validation_images", f"epoch_{epoch}")
+    os.makedirs(val_dir, exist_ok=True)
+
+    latent_shape = [
+        4,
+        64,
+        64,
+    ]
+
+    # Generate validation images
+    generated_images = generate_validation_images(
+        autoencoder=models_dict["autoencoder"],
+        diffusion_unet=models_dict["diffusion_unet"],
+        noise_scheduler=models_dict["noise_scheduler"],
+        scale_factor=models_dict["scale_factor"],
+        device=models_dict["device"],
+        latent_shape=latent_shape,
+        output_dir=val_dir,
+        num_images=2,
+        num_inference_steps=config.get("num_inference_steps", 50),
+    )
+
+    # Log to wandb if available
+    if wandb_run is not None:
+        for idx, img in enumerate(generated_images):
+            # Convert tensor to numpy and normalize for wandb
+            img_np = img.cpu().numpy()[0]  # Remove batch dimension
+            img_np = (img_np + 1) / 2  # Convert from [-1, 1] to [0, 1]
+            wandb_run.log(
+                {f"validation_image_{idx}": wandb.Image(img_np), "epoch": epoch}
+            )
+
+    return val_dir
+
+
+########################################################################################################################
 def diff_model_train(config_path, run_dir, amp=True, start_epoch=0, wandb_run=None):
     args = load_config(config_path)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -192,7 +349,7 @@ def diff_model_train(config_path, run_dir, amp=True, start_epoch=0, wandb_run=No
     logger.info(f"Using device: {device}")
 
     Path(args.model_dir).mkdir(parents=True, exist_ok=True)
-    train_files = load_latents("./outputs/latents")
+    train_files = load_latents(args.latents_path)
     train_loader = prepare_data(
         train_files,
         # train_files[0:1000],
@@ -223,6 +380,33 @@ def diff_model_train(config_path, run_dir, amp=True, start_epoch=0, wandb_run=No
                 "start_epoch": start_epoch,
             }
         )
+
+    ####################################################################################################################
+    # Load config
+    with open("./configs/config_DIFF_norm_v1.json") as f:
+        config = json.load(f)
+
+    model_config = config["model"]["autoencoder"]
+
+    # Load model
+    autoencoder = AutoencoderKlMaisi(**model_config).to(device)
+    checkpoint = torch.load(
+        config["main"]["trained_autoencoder_path"],
+        map_location=device,
+        weights_only=True,
+    )
+    autoencoder.load_state_dict(checkpoint["autoencoder_state_dict"])
+    autoencoder.eval()
+    ####################################################################################################################
+
+    # Create a models dictionary
+    models_dict = {
+        "autoencoder": autoencoder,
+        "diffusion_unet": unet,
+        "noise_scheduler": noise_scheduler,
+        "scale_factor": scale_factor,
+        "device": device,
+    }
 
     for epoch in range(start_epoch, args.diffusion_unet_train["n_epochs"]):
         loss_torch = train_one_epoch(
@@ -256,6 +440,17 @@ def diff_model_train(config_path, run_dir, amp=True, start_epoch=0, wandb_run=No
             run_dir,
             args,
         )
+
+        # After each epoch, generate and save validation images
+        val_dir = save_validation_images_after_epoch(
+            epoch=epoch,
+            run_dir=run_dir,
+            models_dict=models_dict,
+            config=config,
+            wandb_run=wandb_run,
+        )
+
+        print(f"Validation images for epoch {epoch} saved to: {val_dir}")
 
 
 if __name__ == "__main__":
