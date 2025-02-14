@@ -1,5 +1,8 @@
+import json
 import sys
 import os
+
+from torchvision.transforms import transforms
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -12,6 +15,7 @@ import monai
 from networks.autoencoderkl_maisi import AutoencoderKlMaisi
 import random
 from tqdm import tqdm
+from PIL import Image
 
 
 def set_seeds(seed=42):
@@ -23,17 +27,11 @@ def set_seeds(seed=42):
 
 
 def create_transforms():
-    return Compose(
+    return transforms.Compose(
         [
-            monai.transforms.LoadImaged(keys="image"),
-            monai.transforms.EnsureChannelFirstd(keys="image"),
-            monai.transforms.EnsureTyped(keys="image", dtype=torch.float32),
-            monai.transforms.ScaleIntensityRanged(
-                keys="image", a_min=-1000, a_max=1000, b_min=0, b_max=1, clip=True
-            ),
-            monai.transforms.Resized(
-                keys="image", spatial_size=(256, 256), mode="bilinear"
-            ),
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: 2 * x - 1),  # Scale to [-1, 1]
         ]
     )
 
@@ -53,19 +51,24 @@ def process_images(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     transforms = create_transforms()
 
-    model_config = {
-        "spatial_dims": 2,
-        "in_channels": 1,
-        "out_channels": 1,
-        "latent_channels": 4,
-        "num_channels": [64, 128, 256],
-        "num_res_blocks": [2, 2, 2],
-        "norm_num_groups": 32,
-        "norm_eps": 1e-6,
-        "attention_levels": [False, False, False],
-        "with_encoder_nonlocal_attn": False,
-        "with_decoder_nonlocal_attn": False,
-    }
+    # Load config
+    with open("./configs/config_VAE_norm_v1.json") as f:
+        config = json.load(f)
+
+    model_config = config["model"]["autoencoder"]
+    # model_config = {
+    #     "spatial_dims": 2,
+    #     "in_channels": 1,
+    #     "out_channels": 1,
+    #     "latent_channels": 4,
+    #     "num_channels": [64, 128, 256],
+    #     "num_res_blocks": [2, 2, 2],
+    #     "norm_num_groups": 32,
+    #     "norm_eps": 1e-6,
+    #     "attention_levels": [False, False, False],
+    #     "with_encoder_nonlocal_attn": False,
+    #     "with_decoder_nonlocal_attn": False,
+    # }
 
     # Load model
     autoencoder = AutoencoderKlMaisi(**model_config).to(device)
@@ -88,8 +91,11 @@ def process_images(
 
             pbar.set_description(f"Processing {filepath.name}")
 
-            data = {"image": str(filepath)}
-            image = transforms(data)["image"]
+            # data = {"image": str(filepath)}
+            # image = transforms(data)["image"]
+
+            image = Image.open(str(filepath)).convert("L")
+            image = transforms(image)
 
             with torch.no_grad(), torch.amp.autocast("cuda"):
                 latent, _ = autoencoder.encode(image.unsqueeze(0).to(device))

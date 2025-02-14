@@ -1,7 +1,8 @@
 {
     "main": {
         "run_dir": "./runs",
-        "jobname": "VAE_AUG_zscore"
+        "jobname": "norm_v1",
+        "trained_autoencoder_path": "./models/VAE_epoch_20.pt"
     },
     "training": {
         "batch_size": 4,
@@ -49,7 +50,7 @@
     "data": {
         "image_dir1": "/home/mhuber/Thesis/data/KermanyV3_resized/test",
         "image_dir2": "/optima/exchange/mhuber/KermanyV3_resized/train",
-        "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/train",
+        "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/test",
         "train_transform": {
             "resize": [256, 256],
             "random_crop_scale": [0.8, 1.0],

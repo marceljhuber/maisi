@@ -376,7 +376,7 @@ def main():
 
     # Initialize wandb
     wandb.init(
-        project="vae-gan-training-",
+        project="vae-gan-training",
         config=config,
         name=f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
     )

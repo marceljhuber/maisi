@@ -46,7 +46,7 @@ root_dir = tempfile.mkdtemp() if directory is None else directory
 ###################################################################################################
 # CONFIG
 ###################################################################################################
-def load_configs(config_path="./configs/config_INFERENCE_v1.json"):
+def load_configs(config_path="./configs/config_INFERENCE_norm_v1.json"):
     """
     Load configurations from a single JSON file into an argparse.Namespace object
     """
@@ -205,7 +205,7 @@ ldm_sampler = LDMSampler(
     label_output_ext=None,
     real_img_median_statistics=args.real_img_median_statistics,
     spacing=None,
-    num_inference_steps=None,
+    num_inference_steps=args.num_inference_steps,
     mask_generation_num_inference_steps=None,
     random_seed=None,
     autoencoder_sliding_window_infer_size=None,
