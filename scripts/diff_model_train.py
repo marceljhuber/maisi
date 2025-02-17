@@ -187,7 +187,9 @@ def save_checkpoint(
 
     save_path = Path(run_dir) / "models"
     save_path.mkdir(exist_ok=True)
-    torch.save(checkpoint, save_path / f"{run_dir.split('_')[0]}_{epoch}.pt")
+    torch.save(
+        checkpoint, save_path / f"{run_dir.split('/')[1].split('_')[0]}_{epoch}.pt"
+    )
 
 
 ########################################################################################################################
@@ -307,7 +309,7 @@ def save_validation_images_after_epoch(
         config: Configuration dictionary
         wandb_run: Optional wandb run object for logging
     """
-    val_dir = os.path.join(run_dir.split("_")[0], "validation_images", f"epoch_{epoch}")
+    val_dir = os.path.join(run_dir, "validation_images", f"epoch_{epoch}")
     os.makedirs(val_dir, exist_ok=True)
 
     latent_shape = [
@@ -343,8 +345,10 @@ def save_validation_images_after_epoch(
 
 
 ########################################################################################################################
-def diff_model_train(config_path, run_dir, amp=True, start_epoch=0, wandb_run=None):
-    args = load_config(config_path)
+def diff_model_train(
+    config, run_dir, amp=True, start_epoch=0, wandb_run=None, config_path=None
+):
+    args = load_config(config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger = setup_logging("training")
     logger.info(f"Using device: {device}")

@@ -63,19 +63,17 @@ def log_metrics(losses, epoch, phase="train"):
     return {f"{phase}/{k}": v for k, v in losses.items()}
 
 
-def setup_training_dirs(config_name, checkpoint_path=None):
+def setup_training_dirs(name, checkpoint_path=None):
     """Sets up training directories and handles checkpoint loading."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = f"./runs/{config_name}_{timestamp}"
+    run_dir = f"./runs/{name}_{timestamp}"
     Path(run_dir).mkdir(parents=True, exist_ok=True)
 
     model_dir = Path(run_dir) / "models"
     log_dir = Path(run_dir) / "logs"
-    output_dir = Path(run_dir) / "predictions"
 
     model_dir.mkdir(exist_ok=True)
     log_dir.mkdir(exist_ok=True)
-    output_dir.mkdir(exist_ok=True)
 
     model_save_path = model_dir / "diffusion_model.pt"
     start_epoch = 0
@@ -108,7 +106,7 @@ def parse_args():
         help="Path to checkpoint to resume training from",
     )
     parser.add_argument(
-        "--config_name",
+        "--name",
         type=str,
         default="DIFFUSION",
         help="Name for this training run",
@@ -120,7 +118,7 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description="Train diffusion model")
     parser.add_argument("--config", type=str, default="./configs/config_DIFF_v1.json")
-    parser.add_argument("--config_name", type=str, default="DIFFUSION")
+    parser.add_argument("--name", type=str, default="DIFFUSION")
     parser.add_argument(
         "--checkpoint", type=str, default=None, help="Path to checkpoint file"
     )
@@ -129,7 +127,7 @@ def main():
     # Setup
     set_random_seeds()
     start_epoch, run_dir, model_save_path = setup_training_dirs(
-        args.config_name, args.checkpoint
+        args.name, args.checkpoint
     )
 
     # Load config
@@ -162,7 +160,7 @@ def main():
     wandb.init(
         project="diffusion-training",
         config=config,
-        name=f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        name=f"{run_dir.split('/')[-1]}",
     )
 
     print(f"Training directory set up at: {run_dir}")
@@ -181,6 +179,7 @@ def main():
         amp=True,
         start_epoch=start_epoch,
         wandb_run=wandb.run,
+        config_path=args.config,
     )
 
     # Finish wandb run
