@@ -187,8 +187,7 @@ def save_checkpoint(
 
     save_path = Path(run_dir) / "models"
     save_path.mkdir(exist_ok=True)
-    torch.save(checkpoint, save_path / f"model_epoch_{epoch + 1}.pt")
-    # print(f"Saving to: ", save_path / f"model_epoch_{epoch + 1}.pt")
+    torch.save(checkpoint, save_path / f"{run_dir.split('_')[0]}_{epoch}.pt")
 
 
 ########################################################################################################################
@@ -308,7 +307,7 @@ def save_validation_images_after_epoch(
         config: Configuration dictionary
         wandb_run: Optional wandb run object for logging
     """
-    val_dir = os.path.join(run_dir, "validation_images", f"epoch_{epoch}")
+    val_dir = os.path.join(run_dir.split("_")[0], "validation_images", f"epoch_{epoch}")
     os.makedirs(val_dir, exist_ok=True)
 
     latent_shape = [
@@ -385,7 +384,7 @@ def diff_model_train(config_path, run_dir, amp=True, start_epoch=0, wandb_run=No
 
     ####################################################################################################################
     # Load config
-    with open("./configs/config_DIFF_norm_v1.json") as f:
+    with open(config_path) as f:
         config = json.load(f)
 
     model_config = config["model"]["autoencoder"]

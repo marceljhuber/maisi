@@ -283,7 +283,7 @@ def main():
     wandb.init(
         project="vae-gan-training",
         config=config,
-        name=f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        name=f"{config['main']['jobname']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
     )
 
     # Setup
@@ -292,7 +292,7 @@ def main():
 
     # Setup directories
     timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_")
-    run_dir = Path(f"./runs/{timestamp}_{config['main']['jobname']}")
+    run_dir = Path(f"./runs/{config['main']['jobname']}_{timestamp}")
     run_dir.mkdir(parents=True, exist_ok=True)
     recon_dir = run_dir / "reconstructions"
     recon_dir.mkdir(exist_ok=True)
@@ -433,7 +433,7 @@ def main():
                     "best_val_loss": best_val_loss,
                     "config": config,
                 },
-                run_dir / f"autoencoder_epoch_{epoch}.pt",
+                run_dir / f"{config['main']['jobname']}_{epoch}.pt",
             )
 
         # Step schedulers
