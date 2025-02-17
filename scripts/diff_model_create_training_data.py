@@ -1,44 +1,16 @@
 import json
-import sys
 import os
-
-from torchvision.transforms import transforms
+import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 from pathlib import Path
-import nibabel as nib
-import numpy as np
-from monai.transforms import Compose
-import monai
 from networks.autoencoderkl_maisi import AutoencoderKlMaisi
-import random
 from tqdm import tqdm
 from PIL import Image
 
-
-def set_seeds(seed=42):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-
-
-def create_transforms():
-    return transforms.Compose(
-        [
-            transforms.Resize((256, 256)),
-            transforms.ToTensor(),
-            transforms.Lambda(lambda x: 2 * x - 1),  # Scale to [-1, 1]
-        ]
-    )
-
-
-def get_image_files(directory):
-    extensions = (".png", ".jpg", ".jpeg")
-    return sorted(f for ext in extensions for f in Path(directory).rglob(f"*{ext}"))
+from utils_data import list_image_files, set_random_seeds, setup_transforms
 
 
 def process_images(
@@ -47,9 +19,9 @@ def process_images(
     if not Path(input_dir).exists():
         raise FileNotFoundError(f"Input directory {input_dir} not found")
 
-    set_seeds(seed)
+    set_random_seeds(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    transforms = create_transforms()
+    _, transforms = setup_transforms()
 
     # Load config
     with open("./configs/config_VAE_norm_v1.json") as f:
@@ -68,7 +40,7 @@ def process_images(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Process images
-    files = get_image_files(input_dir)
+    files = list_image_files(input_dir)
     with tqdm(files, desc="Converting images to latents") as pbar:
         for filepath in pbar:
             out_filename = out_dir / f"{filepath.stem}_latent.pt"
@@ -77,9 +49,6 @@ def process_images(
                 continue
 
             pbar.set_description(f"Processing {filepath.name}")
-
-            # data = {"image": str(filepath)}
-            # image = transforms(data)["image"]
 
             image = Image.open(str(filepath)).convert("L")
             image = transforms(image)
