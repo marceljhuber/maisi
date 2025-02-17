@@ -11,6 +11,8 @@ from monai.data import DataLoader
 from monai.transforms import Compose
 from monai.utils import first
 from torch.amp import GradScaler, autocast
+
+# from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 import wandb
 

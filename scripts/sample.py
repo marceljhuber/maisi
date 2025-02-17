@@ -104,8 +104,15 @@ def ldm_conditional_sample_one_image(
 
         # Decode latents to images
         synthetic_images = recon_model(latents)
+
         # Keep in [-1,1] range as per training
-        synthetic_images = torch.clip(synthetic_images, -1, 1)
+        # synthetic_images = torch.clip(synthetic_images, -1, 1)
+
+        # Denormalize from [-1,1] to [0,1]
+        synthetic_images = (synthetic_images + 1) / 2.0
+
+        # Convert to uint8 range [0,255]
+        synthetic_images = (synthetic_images * 255).type(torch.uint8)
 
     return synthetic_images
 

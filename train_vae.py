@@ -62,12 +62,14 @@ def split_train_val_by_patient(image_names, train_ratio=0.9):
 class SpeckleNoise:
     """Add speckle noise to images."""
 
-    def __init__(self, noise_std=0.1):
-        self.noise_std = noise_std
+    def __init__(self, noise_level=0.1):
+        self.noise_level = noise_level
 
-    def __call__(self, img):
-        noise = torch.randn_like(img) * self.noise_std
-        return img * (1 + noise)
+    def __call__(self, x):
+        noise = torch.randn_like(x) * self.noise_level
+        noisy = x + noise * x
+        # Clip values to maintain [-1, 1] range
+        return torch.clamp(noisy, -1, 1)
 
 
 class GrayscaleDataset(Dataset):
@@ -163,20 +165,22 @@ def setup_optimizers(autoencoder, discriminator, config):
     )
 
     def warmup_rule(epoch):
-        # Warmup phase: Start with small learning rate to stabilize training
-        # For 40 epochs total, we use first ~10% (4 epochs) for initial warmup
-        if epoch < 4:
-            return 0.01  # Initial learning rate: 1% of final rate
+        return 1.0
 
-        # Intermediate phase: Gradually increase learning rate
-        # Use next ~15% (6 epochs) for smoother transition
-        elif epoch < 10:
-            return 0.1  # Intermediate rate: 10% of final rate
-
-        # Final phase: Use full learning rate for remaining epochs
-        # Remaining ~75% (30 epochs) use full learning rate for optimal training
-        else:
-            return 1.0  # Full learning rate multiplier
+        # # Warmup phase: Start with small learning rate to stabilize training
+        # # For 40 epochs total, we use first ~10% (4 epochs) for initial warmup
+        # if epoch < 4:
+        #     return 0.01  # Initial learning rate: 1% of final rate
+        #
+        # # Intermediate phase: Gradually increase learning rate
+        # # Use next ~15% (6 epochs) for smoother transition
+        # elif epoch < 10:
+        #     return 0.1  # Intermediate rate: 10% of final rate
+        #
+        # # Final phase: Use full learning rate for remaining epochs
+        # # Remaining ~75% (30 epochs) use full learning rate for optimal training
+        # else:
+        #     return 1.0  # Full learning rate multiplier
 
     scheduler_g = lr_scheduler.LambdaLR(optimizer_g, lr_lambda=warmup_rule)
     scheduler_d = lr_scheduler.LambdaLR(optimizer_d, lr_lambda=warmup_rule)
