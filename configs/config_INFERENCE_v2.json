@@ -11,7 +11,7 @@
         "output_prefix": "unet_2d",
         "real_img_median_statistics": "./configs/image_median_statistics.json",
         "trained_autoencoder_path": "./models/VAE/india_best.pt",
-        "trained_diffusion_path": "./models/heinrich2/runs_4.pt"
+        "trained_diffusion_path": "./models/DIFF/kilo_best.pt"
     },
     "training": {
         "diffusion_unet_train": {

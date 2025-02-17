@@ -338,7 +338,6 @@ class LDMSampler:
 
             # Generate image
             to_generate = True
-            try_time = 0
             while to_generate:
                 try:
                     # Sample latent using diffusion model
