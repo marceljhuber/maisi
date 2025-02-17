@@ -43,6 +43,8 @@ def process_images(
     files = list_image_files(input_dir)
     with tqdm(files, desc="Converting images to latents") as pbar:
         for filepath in pbar:
+            # Convert string path to Path object
+            filepath = Path(filepath)
             out_filename = out_dir / f"{filepath.stem}_latent.pt"
 
             if skip_existing and out_filename.exists():
