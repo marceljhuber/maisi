@@ -86,6 +86,13 @@ def ldm_conditional_sample_one_image(
     """
     Generate a single synthetic image using latent diffusion model without ControlNet.
     """
+    # PNG image intensity range
+    a_min = 0
+    a_max = 255
+    # autoencoder output intensity range
+    b_min = -1.0
+    b_max = 1
+
     recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
         device
     )
@@ -102,17 +109,34 @@ def ldm_conditional_sample_one_image(
             noise_pred = diffusion_unet(latents, timesteps)
             latents, _ = noise_scheduler.step(noise_pred, t, latents)
 
+        del noise_pred
+        torch.cuda.empty_cache()
+
         # Decode latents to images
         synthetic_images = recon_model(latents)
 
-        # Keep in [-1,1] range as per training
+        ################################################################################################################
+        # # Keep in [-1,1] range as per training
         # synthetic_images = torch.clip(synthetic_images, -1, 1)
-
-        # Denormalize from [-1,1] to [0,1]
-        synthetic_images = (synthetic_images + 1) / 2.0
-
-        # Convert to uint8 range [0,255]
-        synthetic_images = (synthetic_images * 255).type(torch.uint8)
+        #
+        # # Denormalize from [-1,1] to [0,1]
+        # synthetic_images = (synthetic_images + 1) / 2.0
+        #
+        # # Convert to uint8 range [0,255]
+        # synthetic_images = (synthetic_images * 255).type(torch.uint8)
+        ################################################################################################################
+        # Scale directly from [-1,1] to [0,255]
+        # synthetic_images = (
+        #     ((synthetic_images + 1.0) * 127.5).clamp(0, 255).to(torch.uint8)
+        # )
+        ################################################################################################################
+        synthetic_images = torch.clip(synthetic_images, b_min, b_max).cpu()
+        # project output to [0, 1]
+        synthetic_images = (synthetic_images - b_min) / (b_max - b_min)
+        # project output to [-1000, 1000]
+        synthetic_images = synthetic_images * (a_max - a_min) + a_min
+        torch.cuda.empty_cache()
+        ################################################################################################################
 
     return synthetic_images
 

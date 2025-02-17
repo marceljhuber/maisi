@@ -46,7 +46,7 @@ root_dir = tempfile.mkdtemp() if directory is None else directory
 ###################################################################################################
 # CONFIG
 ###################################################################################################
-def load_configs(config_path="./configs/config_INFERENCE_norm_v1.json"):
+def load_configs(config_path="./configs/config_INFERENCE_v2.json"):
     """
     Load configurations from a single JSON file into an argparse.Namespace object
     """
