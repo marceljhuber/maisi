@@ -211,8 +211,8 @@ def generate_validation_images(
     device,
     latent_shape,
     output_dir,
-    num_images=2,
-    num_inference_steps=50,
+    num_images=8,
+    num_inference_steps=1000,
 ):
     """
     Generate a fixed set of validation images using predefined seeds.
@@ -328,7 +328,7 @@ def save_validation_images_after_epoch(
         latent_shape=latent_shape,
         output_dir=val_dir,
         num_images=2,
-        num_inference_steps=config.get("num_inference_steps", 50),
+        num_inference_steps=config.get("num_inference_steps", 1000),
     )
 
     # Log to wandb if available
