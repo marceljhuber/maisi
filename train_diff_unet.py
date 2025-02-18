@@ -65,7 +65,7 @@ def log_metrics(losses, epoch, phase="train"):
 
 def setup_training_dirs(name, checkpoint_path=None):
     """Sets up training directories and handles checkpoint loading."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     run_dir = f"./runs/{name}_{timestamp}"
     Path(run_dir).mkdir(parents=True, exist_ok=True)
 

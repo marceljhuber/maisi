@@ -354,7 +354,7 @@ class LDMSampler:
                     )
                     print(f"synthetic_image.shape:", synthetic_image.shape)
                     # Save image
-                    output_postfix = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    output_postfix = datetime.now().strftime("%Y%m%d_%H%M")
 
                     # Save the generated image
                     img_saver = SaveImage(

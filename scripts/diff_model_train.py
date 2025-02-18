@@ -183,12 +183,11 @@ def save_checkpoint(
 
     if save_latest:
         torch.save(checkpoint, f"{run_dir}/models/{args.model_filename}")
-        # print(f"Saving latest to:", f"{run_dir}/models/{args.model_filename}")
 
     save_path = Path(run_dir) / "models"
     save_path.mkdir(exist_ok=True)
     torch.save(
-        checkpoint, save_path / f"{run_dir.split('/')[1].split('_')[0]}_{epoch}.pt"
+        checkpoint, save_path / f"{run_dir.split('/')[-1].split('_')[0]}_{epoch}.pt"
     )
 
 
@@ -272,7 +271,7 @@ def generate_validation_images(
             synthetic_image = (synthetic_image * 255).type(torch.uint8)
 
             # Save the generated image
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
             img_saver = SaveImage(
                 output_dir=val_dir,
                 output_postfix=f"val_{seed_idx:02d}_seed{seed}_{timestamp}",
@@ -282,7 +281,7 @@ def generate_validation_images(
             img_saver(synthetic_image[0])
 
             # For return value, keep in normalized form
-            generated_images.append((synthetic_image.float() / 255) * 2 - 1)
+            generated_images.append((synthetic_image.float() / 255) * 2 - 1)  # TODO
 
         except Exception as e:
             print(f"Error generating validation image with seed {seed}: {str(e)}")
