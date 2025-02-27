@@ -96,7 +96,7 @@ def load_configs(config_path="./configs/config_INFERENCE_v2.json"):
 
     # Add batch generation parameters with defaults if not present in config
     batch_generation = config.get("batch_generation", {})
-    args.batch_size = batch_generation.get("batch_size", 96)
+    args.batch_size = batch_generation.get("batch_size", 64)
     args.num_workers = batch_generation.get("num_workers", 4)
     args.prefetch_factor = batch_generation.get("prefetch_factor", 2)
     args.pin_memory = batch_generation.get("pin_memory", True)

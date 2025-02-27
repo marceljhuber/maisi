@@ -283,7 +283,7 @@ def main():
     wandb.init(
         project="vae-gan-training",
         config=config,
-        name=f"{config['main']['jobname']}_{datetime.now().strftime("%Y%m%d_%H%M")}",
+        name=f"{config['main']['jobname']}_{datetime.now().strftime('%Y%m%d_%H%M')}",
     )
 
     # Setup
