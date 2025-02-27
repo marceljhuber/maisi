@@ -283,7 +283,7 @@ def main():
     wandb.init(
         project="vae-gan-training",
         config=config,
-        name=f"{config['main']['jobname']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        name=f"{config['main']['jobname']}_{datetime.now().strftime("%Y%m%d_%H%M")}",
     )
 
     # Setup
@@ -291,7 +291,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Setup directories
-    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     run_dir = Path(f"./runs/{config['main']['jobname']}_{timestamp}")
     run_dir.mkdir(parents=True, exist_ok=True)
     recon_dir = run_dir / "reconstructions"

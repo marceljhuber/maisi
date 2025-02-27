@@ -10,17 +10,8 @@
         "output_dir": "./predictions",
         "output_prefix": "unet_2d",
         "real_img_median_statistics": "./configs/image_median_statistics.json",
-        "trained_autoencoder_path": "./models/VAE/november_2.pt",
-        "trained_diffusion_path": "./models/DIFF/heinrich3/runs_6.pt"
-    },
-    "training": {
-        "diffusion_unet_train": {
-            "batch_size": 1,
-            "cache_rate": 0,
-            "lr": 0.0001,
-            "n_epochs": 1000
-        },
-        "save_every": 1
+        "trained_autoencoder_path": "./models/VAE/lima_best.pt",
+        "trained_diffusion_path": "./models/DIFF/ida/runs_218.pt"
     },
     "inference": {
         "diffusion_unet_inference": {
@@ -33,6 +24,15 @@
             "spacing": [1.0, 1.0, 1.0],
             "top_region_index": [0, 1, 0, 0]
         }
+    },
+    "training": {
+        "diffusion_unet_train": {
+            "batch_size": 1,
+            "cache_rate": 0,
+            "lr": 0.0001,
+            "n_epochs": 1000
+        },
+        "save_every": 1
     },
     "model_config": {
         "image_channels": 1,

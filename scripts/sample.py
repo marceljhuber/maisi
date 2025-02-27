@@ -353,13 +353,18 @@ class LDMSampler:
                         num_inference_steps=self.num_inference_steps,
                     )
                     print(f"synthetic_image.shape:", synthetic_image.shape)
+
+                    # Rotate image to correct orientation (rotate 90 degrees clockwise to fix 270 degree rotation)
+                    # For a tensor with shape [batch, channel, height, width]
+                    synthetic_image = synthetic_image.transpose(2, 3).flip(2)
+
                     # Save image
-                    output_postfix = datetime.now().strftime("%Y%m%d_%H%M")
+                    output_postfix = datetime.now().strftime("%m%d_%H%M%S")
 
                     # Save the generated image
                     img_saver = SaveImage(
                         output_dir=self.output_dir,
-                        output_postfix=output_postfix + "_image",
+                        output_postfix=output_postfix,
                         output_ext=self.image_output_ext,
                         separate_folder=False,
                     )
@@ -368,7 +373,7 @@ class LDMSampler:
                     # Get the full path of saved image
                     synthetic_image_filename = os.path.join(
                         self.output_dir,
-                        "sample_" + output_postfix + "_image" + self.image_output_ext,
+                        output_postfix + self.image_output_ext,
                     )
 
                     output_filenames.append(synthetic_image_filename)

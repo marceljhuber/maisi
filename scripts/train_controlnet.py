@@ -34,31 +34,42 @@ from .utils import (
     setup_ddp,
 )
 
+from scripts.utils_data import setup_training
+from scripts.utils_data import setup_training
+
 
 def main():
     parser = argparse.ArgumentParser(description="maisi.controlnet.training")
     parser.add_argument(
-        "-e",
-        "--environment-file",
-        default="./configs_old/environment_maisi_controlnet_train.json",
-        help="environment json file that stores environment path",
+        "--config_path",
+        default="./configs/config_CONTROLNET_v1.json",
+        help="config json file that stores controlnet settings",
     )
-    parser.add_argument(
-        "-c",
-        "--config-file",
-        default="./configs_old/config_maisi.json",
-        help="config json file that stores network hyper-parameters",
-    )
-    parser.add_argument(
-        "-t",
-        "--training-config",
-        default="./configs_old/config_maisi_controlnet_train.json",
-        help="config json file that stores training hyper-parameters",
-    )
+    # parser.add_argument(
+    #     "-e",
+    #     "--environment-file",
+    #     default="./configs_old/environment_maisi_controlnet_train.json",
+    #     help="environment json file that stores environment path",
+    # )
+    # parser.add_argument(
+    #     "-c",
+    #     "--config-file",
+    #     default="./configs_old/config_maisi.json",
+    #     help="config json file that stores network hyper-parameters",
+    # )
+    # parser.add_argument(
+    #     "-t",
+    #     "--training-config",
+    #     default="./configs_old/config_maisi_controlnet_train.json",
+    #     help="config json file that stores training hyper-parameters",
+    # )
     parser.add_argument(
         "-g", "--gpus", default=1, type=int, help="number of gpus per node"
     )
     args = parser.parse_args()
+
+    with open(args.config_path, "r") as f:
+        config = json.load(f)
 
     # Step 0: configuration
     logger = logging.getLogger("maisi.controlnet.training")
@@ -78,36 +89,19 @@ def main():
     logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
     logger.info(f"World_size: {world_size}")
 
-    with open(args.environment_file, "r") as env_file:
-        env_dict = json.load(env_file)
-    with open(args.config_file, "r") as config_file:
-        config_dict = json.load(config_file)
-    with open(args.training_config, "r") as training_config_file:
-        training_config_dict = json.load(training_config_file)
+    env_dict = config["environment"]
+    model_def_dict = config["model_def"]
+    training_dict = config["training"]
 
     for k, v in env_dict.items():
         setattr(args, k, v)
-    for k, v in config_dict.items():
+    for k, v in model_def_dict.items():
         setattr(args, k, v)
-    for k, v in training_config_dict.items():
+    for k, v in training_dict.items():
         setattr(args, k, v)
-
-    # initialize tensorboard writer
-    if rank == 0:
-        tensorboard_path = os.path.join(args.tfevent_path, args.exp_name)
-        Path(tensorboard_path).mkdir(parents=True, exist_ok=True)
-        tensorboard_writer = SummaryWriter(tensorboard_path)
 
     # Step 1: set data loader
-    train_loader, _ = prepare_maisi_controlnet_json_dataloader(
-        json_data_list=args.json_data_list,
-        data_base_dir=args.data_base_dir,
-        rank=rank,
-        world_size=world_size,
-        batch_size=args.controlnet_train["batch_size"],
-        cache_rate=args.controlnet_train["cache_rate"],
-        fold=args.controlnet_train["fold"],
-    )
+    train_loader, _ = setup_training(config)
 
     # Step 2: define diffusion model and controlnet
     # define diffusion Model
@@ -196,10 +190,6 @@ def main():
             # get image embedding and label mask and scale image embedding by the provided scale_factor
             inputs = batch["image"].to(device) * scale_factor
             labels = batch["label"].to(device)
-            # get corresponding conditions
-            top_region_index_tensor = batch["top_region_index"].to(device)
-            bottom_region_index_tensor = batch["bottom_region_index"].to(device)
-            spacing_tensor = batch["spacing"].to(device)
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -234,9 +224,6 @@ def main():
                 noise_pred = unet(
                     x=noisy_latent,
                     timesteps=timesteps,
-                    top_region_index_tensor=top_region_index_tensor,
-                    bottom_region_index_tensor=bottom_region_index_tensor,
-                    spacing_tensor=spacing_tensor,
                     down_block_additional_residuals=down_block_res_samples,
                     mid_block_additional_residual=mid_block_res_sample,
                 )
@@ -267,12 +254,6 @@ def main():
             total_step += 1
 
             if rank == 0:
-                # write train loss for each batch into tensorboard
-                tensorboard_writer.add_scalar(
-                    "train/train_controlnet_loss_iter",
-                    loss.detach().cpu().item(),
-                    total_step,
-                )
                 batches_done = step + 1
                 batches_left = len(train_loader) - batches_done
                 time_left = timedelta(seconds=batches_left * (time.time() - prev_time))
@@ -298,9 +279,6 @@ def main():
             dist.all_reduce(epoch_loss, op=torch.distributed.ReduceOp.AVG)
 
         if rank == 0:
-            tensorboard_writer.add_scalar(
-                "train/train_controlnet_loss_epoch", epoch_loss.cpu().item(), total_step
-            )
             # save controlnet only on master GPU (rank 0)
             controlnet_state_dict = (
                 controlnet.module.state_dict()

@@ -167,12 +167,6 @@ def main():
         # get target dimension
         dim = batch["dim"]
         output_size = (dim[0].item(), dim[1].item(), dim[2].item())
-        latent_shape = (
-            args.latent_channels,
-            output_size[0] // 4,
-            output_size[1] // 4,
-            output_size[2] // 4,
-        )
         # check if output_size and out_spacing are valid.
         check_input(None, None, None, output_size, out_spacing, None)
         # generate a single synthetic image using a latent diffusion model with controlnet.
@@ -184,17 +178,7 @@ def main():
             scale_factor,
             device,
             labels,
-            top_region_index_tensor,
-            bottom_region_index_tensor,
-            spacing_tensor,
-            latent_shape=latent_shape,
-            output_size=output_size,
-            noise_factor=1.0,
             num_inference_steps=args.controlnet_infer["num_inference_steps"],
-            # reduce it when GPU memory is limited
-            autoencoder_sliding_window_infer_size=args.controlnet_infer[
-                "autoencoder_sliding_window_infer_size"
-            ],
         )
         # save image/label pairs
         labels = decollate_batch(batch)[0]["label"]

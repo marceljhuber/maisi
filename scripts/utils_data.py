@@ -86,6 +86,39 @@ class GrayscaleDataset(Dataset):
         return {"image": image}
 
 
+class GrayscaleDatasetLabels(Dataset):
+    """Dataset for grayscale images with one-hot encoded labels."""
+
+    def __init__(self, image_paths, transform=None, num_classes=5):
+        self.image_paths = image_paths
+        self.transform = transform
+        self.num_classes = num_classes
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        image_path = self.image_paths[idx]
+        image = Image.open(image_path).convert("L")
+
+        # Extract class index from image path
+        # Assuming the class is a single digit in the filename
+        class_idx = int([c for c in Path(image_path).stem if c.isdigit()][0])
+
+        # Create one-hot encoded label with 5 dimensions
+        label = torch.zeros(self.num_classes)
+        label[class_idx] = 1  # Set the corresponding class index to 1
+
+        if self.transform:
+            image = self.transform(image)
+
+        # Reshape label to [num_classes, H, W] for each pixel
+        H, W = image.shape[1:]  # Assuming image is [C, H, W]
+        label = label.view(-1, 1, 1).repeat(1, H, W)
+
+        return {"image": image, "label": label}
+
+
 def setup_transforms():
     train_transform = transforms.Compose(
         [
@@ -129,3 +162,52 @@ def setup_dataloaders(train_images, val_images, train_transform, val_transform, 
     )
 
     return train_loader, val_loader
+
+
+def setup_training(config):
+    """Setup all training components."""
+    # Set random seeds
+    set_random_seeds()
+
+    # Setup device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Setup directories
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_")
+    run_dir = Path(f"./runs/{config['main']['jobname']}_{timestamp}")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    recon_dir = run_dir / "reconstructions"
+    recon_dir.mkdir(exist_ok=True)
+
+    # Setup data
+    image_files = list_image_files(config["data"]["image_dir"])
+
+    # Split by patient ID instead of random split
+    train_images, val_images = split_train_val_by_patient(image_files, train_ratio=0.9)
+
+    print(
+        f"Found {len(train_images)} train images and {len(val_images)} validation images."
+    )
+
+    # Setup transforms
+    train_transform, val_transform = setup_transforms()
+
+    # Setup dataloaders
+    train_dataset = GrayscaleDatasetLabels(train_images, transform=val_transform)
+    val_dataset = GrayscaleDatasetLabels(val_images, transform=val_transform)
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config["training"]["batch_size"],
+        shuffle=True,
+        num_workers=config["training"]["num_workers"],
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=config["training"]["batch_size"],
+        shuffle=True,
+        num_workers=config["training"]["num_workers"],
+    )
+
+    return device, run_dir, recon_dir, train_loader, val_loader
