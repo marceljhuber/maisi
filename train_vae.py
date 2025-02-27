@@ -302,7 +302,7 @@ def main():
     train_images, val_images = split_train_val_by_patient(image_files)
     print(f"Found {len(train_images)} train images.")
     train_transform, val_transform = setup_transforms()
-    train_transform = val_transform  # No train transform #TODO
+    # train_transform = val_transform  # No train transform #TODO
     train_loader, val_loader = setup_dataloaders(
         train_images, val_images, train_transform, val_transform, config
     )
