@@ -103,7 +103,8 @@ def ldm_conditional_sample_one_image(
 
         # Synthesize latents
         noise_scheduler.set_timesteps(num_inference_steps=num_inference_steps)
-        for t in tqdm(noise_scheduler.timesteps, ncols=110):
+        # for t in tqdm(noise_scheduler.timesteps, ncols=110):
+        for t in noise_scheduler.timesteps:  # TODO tqdm
             timesteps = torch.Tensor((t,)).to(device)
             # Just use UNet without ControlNet conditioning
             noise_pred = diffusion_unet(latents, timesteps)
@@ -332,7 +333,7 @@ class LDMSampler:
         """
         output_filenames = []
 
-        for _ in range(num_img):
+        for _ in tqdm(range(num_img)):
             logging.info("---- Starting image generation... ----")
             start_time = time.time()
 
@@ -352,7 +353,7 @@ class LDMSampler:
                         noise_factor=self.noise_factor,
                         num_inference_steps=self.num_inference_steps,
                     )
-                    print(f"synthetic_image.shape:", synthetic_image.shape)
+                    # print(f"synthetic_image.shape:", synthetic_image.shape)
 
                     # Rotate image to correct orientation (rotate 90 degrees clockwise to fix 270 degree rotation)
                     # For a tensor with shape [batch, channel, height, width]
