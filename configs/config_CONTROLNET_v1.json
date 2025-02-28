@@ -8,10 +8,11 @@
     "environment": {
         "model_dir": "./models",
         "output_dir": "./outputs",
+        "latent_dir": "./outputs/latents_india",
         "tfevent_path": "./outputs/tfevent",
         "trained_autoencoder_path": "./models/VAE/november_2.pt",
         "trained_diffusion_path": "./models/DIFF/heinrich3/runs_6.pt",
-        "trained_controlnet_path": "./models/controlnet.pt",
+        "trained_controlnet_path": null,
         "exp_name": "controlnet_kits_finetune",
         "data_base_dir": ["./datasets/C4KC-KiTS_subset"],
         "json_data_list": ["./datasets/C4KC-KiTS_subset.json"]
@@ -20,7 +21,7 @@
         "batch_size": 1,
         "num_workers": 16,
         "controlnet_train": {
-            "batch_size": "@batch_size",
+            "batch_size": 1,
             "cache_rate": 0.0,
             "fold": 0,
             "lr": 1e-5,
@@ -34,10 +35,10 @@
         }
     },
     "model_def": {
-        "spatial_dims": 3,
+        "spatial_dims": 2,
         "image_channels": 1,
         "latent_channels": 4,
-        "mask_generation_latent_shape": [4, 64, 64, 64],
+        "mask_generation_latent_shape": [4, 64, 64],
         "autoencoder_def": {
             "_target_": "monai.apps.generation.maisi.networks.autoencoderkl_maisi.AutoencoderKlMaisi",
             "spatial_dims": "@spatial_dims",
@@ -71,9 +72,9 @@
             "num_head_channels": [0, 0, 32, 32],
             "num_res_blocks": 2,
             "use_flash_attention": true,
-            "include_top_region_index_input": true,
-            "include_bottom_region_index_input": true,
-            "include_spacing_input": true
+            "include_top_region_index_input": false,
+            "include_bottom_region_index_input": false,
+            "include_spacing_input": false
         },
         "controlnet_def": {
             "_target_": "monai.apps.generation.maisi.networks.controlnet_maisi.ControlNetMaisi",
@@ -91,7 +92,7 @@
             ],
             "num_res_blocks": 2,
             "use_flash_attention": true,
-            "conditioning_embedding_in_channels": 8,
+            "conditioning_embedding_in_channels": 4,
             "conditioning_embedding_num_channels": [8, 32, 64]
         },
         "mask_generation_autoencoder_def": {
