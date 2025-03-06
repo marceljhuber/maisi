@@ -1,11 +1,12 @@
 {
     "main": {
         "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/train",
-        "jobname": "november",
+        "jobname": "america",
         "run_dir": "./runs"
 
     },
     "environment": {
+        "exp_name": "controlnet_kits_finetune",
         "model_dir": "./models",
         "output_dir": "./outputs",
         "latent_dir": "./outputs/latents_india",
@@ -13,7 +14,6 @@
         "trained_autoencoder_path": "./models/VAE/november_2.pt",
         "trained_diffusion_path": "./models/DIFF/heinrich3/runs_6.pt",
         "trained_controlnet_path": null,
-        "exp_name": "controlnet_kits_finetune",
         "data_base_dir": ["./datasets/C4KC-KiTS_subset"],
         "json_data_list": ["./datasets/C4KC-KiTS_subset.json"]
     },
