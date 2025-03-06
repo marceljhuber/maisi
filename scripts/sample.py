@@ -135,7 +135,7 @@ def ldm_conditional_sample_one_image(
         synthetic_images = torch.clip(synthetic_images, b_min, b_max).cpu()
         # project output to [0, 1]
         synthetic_images = (synthetic_images - b_min) / (b_max - b_min)
-        # project output to [-1000, 1000]
+        # project output to [-1, 1]
         synthetic_images = synthetic_images * (a_max - a_min) + a_min
         torch.cuda.empty_cache()
         ################################################################################################################
@@ -152,7 +152,6 @@ def ldm_conditional_sample_one_image_controlnet(
     device,
     combine_label_or,
     latent_shape,
-    output_size,
     noise_factor,
     num_inference_steps=1000,
 ):
@@ -175,33 +174,31 @@ def ldm_conditional_sample_one_image_controlnet(
     Returns:
         tuple: A tuple containing the synthetic image and its corresponding label.
     """
-    # CT image intensity range
+    # PNG image intensity range
     a_min = 0
     a_max = 255
     # autoencoder output intensity range
     b_min = -1.0
     b_max = 1
 
+    torch.cuda.empty_cache()
+
     recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
         device
     )
 
-    # print(f"combine_label_or.shape:", combine_label_or.shape)
+    # print(f"S: 01")
+
+    # Before the inference loop
+    # controlnet.enable_gradient_checkpointing()
+    # diffusion_unet.enable_gradient_checkpointing()
+    # Add at various points to track memory
+    # print(f"Memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
+    # print(f"Memory reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
 
     with torch.no_grad(), torch.amp.autocast("cuda"):
         # generate segmentation mask
         combine_label = combine_label_or.to(device)
-        # if (
-        #     output_size[0] != combine_label.shape[2]
-        #     or output_size[1] != combine_label.shape[3]
-        #     or output_size[2] != combine_label.shape[4]
-        # ):
-        #     logging.info(
-        #         "output_size is not a desired value. Need to interpolate the mask to match with output_size. The result image will be very low quality."
-        #     )
-        #     combine_label = torch.nn.functional.interpolate(
-        #         combine_label, size=output_size, mode="nearest"
-        #     )
 
         # controlnet_cond_vis = binarize_labels(combine_label.as_tensor().long()).half()
         controlnet_cond_vis = combine_label
@@ -211,7 +208,14 @@ def ldm_conditional_sample_one_image_controlnet(
 
         # synthesize latents
         noise_scheduler.set_timesteps(num_inference_steps=num_inference_steps)
-        for t in tqdm(noise_scheduler.timesteps, ncols=110):
+        # print(f"S: 02")
+        # for t in tqdm(noise_scheduler.timesteps, ncols=110):
+        total_steps = len(noise_scheduler.timesteps)
+        for step_idx, t in enumerate(noise_scheduler.timesteps):
+            # Print progress every 100 steps
+            # if step_idx % 100 == 0 or step_idx == total_steps - 1:
+            # print(f"Step {step_idx + 1}/{total_steps} completed")
+
             # Get controlnet output
             down_block_res_samples, mid_block_res_sample = controlnet(
                 x=latents,
@@ -236,93 +240,12 @@ def ldm_conditional_sample_one_image_controlnet(
         ## post processing:
         # project output to [0, 1]
         synthetic_images = (synthetic_images - b_min) / (b_max - b_min)
-        # project output to [-1000, 1000]
+        # project output to [-1, 1]
         synthetic_images = synthetic_images * (a_max - a_min) + a_min
         # regularize background intensities
         torch.cuda.empty_cache()
 
     return synthetic_images, combine_label
-
-
-def check_input(
-    body_region,
-    anatomy_list,
-    label_dict_json,
-    output_size,
-    spacing,
-    controllable_anatomy_size=[("pancreas", 0.5)],
-):
-    """
-    Validate input parameters for image generation.
-
-    Args:
-        body_region (list): List of body regions.
-        anatomy_list (list): List of anatomical structures.
-        label_dict_json (str): Path to the label dictionary JSON file.
-        output_size (tuple): Desired output size of the image.
-        spacing (tuple): Desired voxel spacing.
-        controllable_anatomy_size (list): List of tuples specifying controllable anatomy sizes.
-
-    Raises:
-        ValueError: If any input parameter is invalid.
-    """
-    # check output_size and spacing format
-    if output_size[0] != output_size[1]:
-        raise ValueError(
-            f"The first two components of output_size need to be equal, yet got {output_size}."
-        )
-    if output_size[0] not in [256, 384, 512]:
-        raise ValueError(
-            f"The output_size[0] have to be chosen from [256, 384, 512], yet got {output_size}."
-        )
-
-    if spacing[0] != spacing[1]:
-        raise ValueError(
-            f"The first two components of spacing need to be equal, yet got {spacing}."
-        )
-    if spacing[0] < 0.5 or spacing[0] > 3.0 or spacing[2] < 0.5 or spacing[2] > 5.0:
-        raise ValueError(
-            f"spacing[0] have to be between 0.5 and 3.0 mm, spacing[2] have to be between 0.5 and 5.0 mm, yet got {spacing}."
-        )
-
-    if output_size[0] * spacing[0] < 256:
-        FOV = [output_size[axis] * spacing[axis] for axis in range(3)]
-        raise ValueError(
-            f"`'spacing'({spacing}mm) and 'output_size'({output_size}) together decide the output field of view (FOV). The FOV will be {FOV}mm. We recommend the FOV in x and y axis to be at least 256mm for head, and at least 384mm for other body regions like abdomen. There is no such restriction for z-axis."
-        )
-
-    if controllable_anatomy_size == None:
-        logging.info(f"`controllable_anatomy_size` is not provided.")
-        return
-
-    # check controllable_anatomy_size format
-    if len(controllable_anatomy_size) > 10:
-        raise ValueError(
-            f"The length of list controllable_anatomy_size has to be less than 10. Yet got length equal to {len(controllable_anatomy_size)}."
-        )
-
-    if len(controllable_anatomy_size) > 0:
-        logging.info(
-            f"`controllable_anatomy_size` is not empty.\nWe will ignore `body_region` and `anatomy_list` and synthesize based on `controllable_anatomy_size`: ({controllable_anatomy_size})."
-        )
-    else:
-        logging.info(
-            f"`controllable_anatomy_size` is empty.\nWe will synthesize based on `body_region`: ({body_region}) and `anatomy_list`: ({anatomy_list})."
-        )
-
-        # check anatomy_list format
-        with open(label_dict_json) as f:
-            label_dict = json.load(f)
-        for anatomy in anatomy_list:
-            if anatomy not in label_dict.keys():
-                raise ValueError(
-                    f"The components in anatomy_list have to be chosen from {label_dict.keys()}, yet got {anatomy}."
-                )
-    logging.info(
-        f"The generate results will have voxel size to be {spacing}mm, volume size to be {output_size}."
-    )
-
-    return
 
 
 class LDMSampler:

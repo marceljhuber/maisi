@@ -187,7 +187,10 @@ def main():
     controlnet.eval()
     unet.eval()
 
+    # output_filenames = []
+
     for batch_idx, batch in enumerate(val_loader):
+        print(f"Starting batch {batch_idx}/{len(val_loader)}.")
         # The GrayscaleDatasetLabels class already provides labels in format [batch_size, num_classes, H, W]
         # These labels are already one-hot encoded in the dataset
         labels = batch["label"].to(device)
@@ -233,7 +236,7 @@ def main():
         latent_shape = [4, 64, 64]
 
         # generate a single synthetic image using a latent diffusion model with controlnet.
-        synthetic_images, _ = ldm_conditional_sample_one_image_controlnet(
+        synthetic_image, _ = ldm_conditional_sample_one_image_controlnet(
             autoencoder=autoencoder,
             diffusion_unet=unet,
             controlnet=controlnet,
@@ -242,38 +245,53 @@ def main():
             device=device,
             combine_label_or=labels,
             latent_shape=latent_shape,
-            output_size=(256, 256, 1),
             noise_factor=1,
             num_inference_steps=1000,
         )
 
+        # Rotate image to correct orientation (rotate 90 degrees clockwise to fix 270 degree rotation)
+        # For a tensor with shape [batch, channel, height, width]
+        synthetic_image = synthetic_image.transpose(2, 3).flip(2)
+
         # Modified: Save images as PNG
         timestamp = datetime.now().strftime("%Y%m%d_%H%M_%f")
 
-        for i in range(synthetic_images.shape[0]):
-            # Get class index for this sample (if available)
-            class_idx = i % 4  # Default to i mod 4
-            if "class_idx" in batch and i < len(batch["class_idx"]):
-                class_idx = batch["class_idx"][i].item()
+        # Save the generated image
+        img_saver = SaveImage(
+            output_dir=args.output_dir,
+            output_postfix=timestamp,
+            output_ext=".png",
+            separate_folder=False,
+        )
+        img_saver(synthetic_image[0])
 
-            # Get patient ID (if available)
-            patient_id = f"patient{batch_idx}_{i}"
-            if "patient_id" in batch and i < len(batch["patient_id"]):
-                patient_id = str(batch["patient_id"][i])
+        # output_filenames.append(synthetic_image_filename)
 
-            # Save synthetic image as PNG with class and patient info
-            image_filename = f"class{class_idx}-{patient_id}_{timestamp}_image.png"
-            image_path = os.path.join(args.output_dir, image_filename)
-            save_as_png(synthetic_images[i], image_path)
-
-            # Save label image as PNG
-            label_filename = f"class{class_idx}-{patient_id}_{timestamp}_label.png"
-            label_path = os.path.join(args.output_dir, label_filename)
-            save_as_png(labels[i], label_path)
-
-            logger.info(f"Saved sample {i} from batch {batch_idx} to {image_path}")
+        # print(f"    For i in range:", synthetic_images.shape[0])
+        # for i in range(synthetic_images.shape[0]):
+        #     # Get class index for this sample (if available)
+        #     class_idx = i % 4  # Default to i mod 4
+        #     if "class_idx" in batch and i < len(batch["class_idx"]):
+        #         class_idx = batch["class_idx"][i].item()
+        #
+        #     # Get patient ID (if available)
+        #     patient_id = f"patient{batch_idx}_{i}"
+        #     if "patient_id" in batch and i < len(batch["patient_id"]):
+        #         patient_id = str(batch["patient_id"][i])
+        #
+        #     # Save synthetic image as PNG with class and patient info
+        #     image_filename = f"class{class_idx}-{patient_id}_{timestamp}_image.png"
+        #     image_path = os.path.join(args.output_dir, image_filename)
+        #
+        #     # Save label image as PNG
+        #     label_filename = f"class{class_idx}-{patient_id}_{timestamp}_label.png"
+        #     label_path = os.path.join(args.output_dir, label_filename)
+        #     save_as_png(labels[i], label_path)
+        #
+        #     logger.info(f"Saved sample {i} from batch {batch_idx} to {image_path}")
 
     if use_ddp:
+        print(f"Destroying Something.")
         dist.destroy_process_group()
 
 
