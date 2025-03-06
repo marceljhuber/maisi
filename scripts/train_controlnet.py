@@ -26,6 +26,7 @@ from monai.utils import RankFilter
 from torch.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
+from monai.data.meta_tensor import MetaTensor
 
 from .utils import (
     binarize_labels,
@@ -34,7 +35,7 @@ from .utils import (
     setup_ddp,
 )
 
-from scripts.utils_data import setup_training
+from scripts.utils_data import setup_training, create_latent_dataloaders
 from scripts.utils_data import setup_training
 
 
@@ -42,7 +43,7 @@ def main():
     parser = argparse.ArgumentParser(description="maisi.controlnet.training")
     parser.add_argument(
         "--config_path",
-        default="./configs/config_CONTROLNET_v1.json",
+        default="./configs/config_CONTROLNET_v2.json",
         help="config json file that stores controlnet settings",
     )
     # parser.add_argument(
@@ -93,13 +94,6 @@ def main():
     model_def_dict = config["model_def"]
     training_dict = config["training"]
 
-    # with open(args.environment_file, "r") as env_file:
-    #     env_dict = json.load(env_file)
-    # with open(args.config_file, "r") as config_file:
-    #     model_def_dict = json.load(config_file)
-    # with open(args.training_config, "r") as training_config_file:
-    #     training_config_dict = json.load(training_config_file)
-
     for k, v in env_dict.items():
         setattr(args, k, v)
     for k, v in model_def_dict.items():
@@ -108,17 +102,9 @@ def main():
         setattr(args, k, v)
 
     # Step 1: set data loader
-    train_loader, _ = setup_training(config)
-
-    # train_loader, _ = prepare_maisi_controlnet_json_dataloader(
-    #     json_data_list=args.json_data_list,
-    #     data_base_dir=args.data_base_dir,
-    #     rank=rank,
-    #     world_size=world_size,
-    #     batch_size=args.controlnet_train["batch_size"],
-    #     cache_rate=args.controlnet_train["cache_rate"],
-    #     fold=args.controlnet_train["fold"],
-    # )
+    # device, run_dir, recon_dir, train_loader, val_loader = setup_training(config)
+    print(f"latent_dir:", args.latent_dir)
+    train_loader, val_loader = create_latent_dataloaders(args.latent_dir)
 
     # Step 2: define diffusion model and controlnet
     # define diffusion Model
@@ -127,9 +113,13 @@ def main():
     if args.trained_diffusion_path is not None:
         if not os.path.exists(args.trained_diffusion_path):
             raise ValueError("Please download the trained diffusion unet checkpoint.")
+
         diffusion_model_ckpt = torch.load(
-            args.trained_diffusion_path, map_location=device
+            args.trained_diffusion_path,
+            map_location=device,
+            weights_only=False,
         )
+
         unet.load_state_dict(diffusion_model_ckpt["unet_state_dict"])
         # load scale factor from diffusion model checkpoint
         scale_factor = diffusion_model_ckpt["scale_factor"]
@@ -205,8 +195,22 @@ def main():
         epoch_loss_ = 0
         for step, batch in enumerate(train_loader):
             # get image embedding and label mask and scale image embedding by the provided scale_factor
-            inputs = batch["image"].to(device) * scale_factor
+            # inputs = batch["image"].to(device) * scale_factor
+            # labels = batch["label"].to(device)
+            inputs = batch["latent"].squeeze(1).to(device) * scale_factor
             labels = batch["label"].to(device)
+
+            labels = labels.unsqueeze(-1).unsqueeze(-1)  # Now shape [40, 4, 1, 1]
+            labels = F.interpolate(
+                labels, size=(256, 256), mode="bilinear", align_corners=False
+            )  # Now shape [40, 4, 256, 256, 1]
+
+            # labels = torch.zeros_like(inputs, dtype=torch.float32)
+            # labels[1] = labels_[-1]
+            # labels = batch["label"].to(device)
+            # print("===" * 20)
+            # print(f"inputs.shape:", inputs.shape)
+            # print(f"labels.shape:", labels.shape)
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -214,11 +218,16 @@ def main():
                 # generate random noise
                 noise_shape = list(inputs.shape)
                 noise = torch.randn(noise_shape, dtype=inputs.dtype).to(device)
+                # print(f"noise.shape:", noise.shape)
 
-                # use binary encoding to encode segmentation mask
-                controlnet_cond = binarize_labels(
-                    labels.as_tensor().to(torch.uint8)
-                ).float()
+                # controlnet_cond = binarize_labels(
+                #     labels.to(
+                #         torch.uint8
+                #     )  # Remove the as_tensor() call since labels is already a tensor
+                # ).float()
+                controlnet_cond = labels.float()
+                # print(f"controlnet_cond.shape:", controlnet_cond.shape)
+                # print("===" * 20)
 
                 # create timesteps
                 timesteps = torch.randint(
@@ -245,24 +254,42 @@ def main():
                     mid_block_additional_residual=mid_block_res_sample,
                 )
 
+            ##########################################################################
             if weighted_loss > 1.0:
                 weights = torch.ones_like(inputs).to(inputs.device)
-                roi = torch.zeros([noise_shape[0]] + [1] + noise_shape[2:]).to(
-                    inputs.device
-                )
+
+                # Create a mask in float32 format
+                roi_mask = torch.zeros_like(inputs[:, :1], dtype=torch.float32)
+
                 interpolate_label = F.interpolate(
                     labels, size=inputs.shape[2:], mode="nearest"
                 )
-                # assign larger weights for ROI (tumor)
+
+                # For each target label, add to the mask
                 for label in weighted_loss_label:
-                    roi[interpolate_label == label] = 1
-                weights[roi.repeat(1, inputs.shape[1], 1, 1, 1) == 1] = weighted_loss
+                    for channel in range(interpolate_label.shape[1]):
+                        # Create mask for this channel/label combination
+                        channel_mask = (
+                            interpolate_label[:, channel : channel + 1] == label
+                        ).float()
+                        # Add masks instead of OR operation
+                        roi_mask = roi_mask + channel_mask
+
+                # Convert to binary mask (any positive value becomes 1)
+                roi_mask = (roi_mask > 0).float()
+
+                # Apply the mask to weights
+                weights = weights.masked_fill(
+                    roi_mask.repeat(1, inputs.shape[1], 1, 1) > 0, weighted_loss
+                )
+
                 loss = (
                     F.l1_loss(noise_pred.float(), noise.float(), reduction="none")
                     * weights
                 ).mean()
             else:
                 loss = F.l1_loss(noise_pred.float(), noise.float())
+            ##########################################################################
 
             scaler.scale(loss).backward()
             scaler.step(optimizer)
