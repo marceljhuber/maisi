@@ -16,9 +16,11 @@ import os
 import sys
 import time
 from datetime import timedelta
+from datetime import datetime
 from pathlib import Path
 
 import torch
+from tqdm import tqdm
 import torch.distributed as dist
 import torch.nn.functional as F
 from monai.networks.utils import copy_model_state
@@ -26,6 +28,8 @@ from monai.utils import RankFilter
 from torch.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
+from monai.data.meta_tensor import MetaTensor
+import wandb
 
 from .utils import (
     binarize_labels,
@@ -34,7 +38,7 @@ from .utils import (
     setup_ddp,
 )
 
-from scripts.utils_data import setup_training
+from scripts.utils_data import setup_training, create_latent_dataloaders
 from scripts.utils_data import setup_training
 
 
@@ -73,6 +77,7 @@ def main():
 
     # Step 0: configuration
     logger = logging.getLogger("maisi.controlnet.training")
+
     # whether to use distributed data parallel
     use_ddp = args.gpus > 1
     if use_ddp:
@@ -85,6 +90,13 @@ def main():
         world_size = 1
         device = torch.device(f"cuda:{rank}")
 
+    if rank == 0:
+        wandb.init(
+            project="controlnet-training",
+            config=config,
+            name=f"{config['main']['jobname']}_{datetime.now().strftime('%Y_%m%d_%H%M')}",
+        )
+
     torch.cuda.set_device(device)
     logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
     logger.info(f"World_size: {world_size}")
@@ -92,13 +104,6 @@ def main():
     env_dict = config["environment"]
     model_def_dict = config["model_def"]
     training_dict = config["training"]
-
-    # with open(args.environment_file, "r") as env_file:
-    #     env_dict = json.load(env_file)
-    # with open(args.config_file, "r") as config_file:
-    #     model_def_dict = json.load(config_file)
-    # with open(args.training_config, "r") as training_config_file:
-    #     training_config_dict = json.load(training_config_file)
 
     for k, v in env_dict.items():
         setattr(args, k, v)
@@ -108,17 +113,9 @@ def main():
         setattr(args, k, v)
 
     # Step 1: set data loader
-    train_loader, _ = setup_training(config)
-
-    # train_loader, _ = prepare_maisi_controlnet_json_dataloader(
-    #     json_data_list=args.json_data_list,
-    #     data_base_dir=args.data_base_dir,
-    #     rank=rank,
-    #     world_size=world_size,
-    #     batch_size=args.controlnet_train["batch_size"],
-    #     cache_rate=args.controlnet_train["cache_rate"],
-    #     fold=args.controlnet_train["fold"],
-    # )
+    # device, run_dir, recon_dir, train_loader, val_loader = setup_training(config)
+    print(f"latent_dir:", args.latent_dir)
+    train_loader, val_loader = create_latent_dataloaders(args.latent_dir)
 
     # Step 2: define diffusion model and controlnet
     # define diffusion Model
@@ -127,9 +124,13 @@ def main():
     if args.trained_diffusion_path is not None:
         if not os.path.exists(args.trained_diffusion_path):
             raise ValueError("Please download the trained diffusion unet checkpoint.")
+
         diffusion_model_ckpt = torch.load(
-            args.trained_diffusion_path, map_location=device
+            args.trained_diffusion_path,
+            map_location=device,
+            weights_only=False,
         )
+
         unet.load_state_dict(diffusion_model_ckpt["unet_state_dict"])
         # load scale factor from diffusion model checkpoint
         scale_factor = diffusion_model_ckpt["scale_factor"]
@@ -198,15 +199,36 @@ def main():
             f"apply weighted loss = {weighted_loss} on labels: {weighted_loss_label}"
         )
 
+    prev_time = time.time()
     controlnet.train()
     unet.eval()
-    prev_time = time.time()
     for epoch in range(n_epochs):
         epoch_loss_ = 0
-        for step, batch in enumerate(train_loader):
+        for step, batch in enumerate(
+            tqdm(
+                train_loader,
+                desc=f"Epoch {epoch + 1}/{n_epochs}",
+                file=sys.stdout,
+                mininterval=100.0,
+            )
+        ):
             # get image embedding and label mask and scale image embedding by the provided scale_factor
-            inputs = batch["image"].to(device) * scale_factor
+            # inputs = batch["image"].to(device) * scale_factor
+            # labels = batch["label"].to(device)
+            inputs = batch["latent"].squeeze(1).to(device) * scale_factor
             labels = batch["label"].to(device)
+
+            labels = labels.unsqueeze(-1).unsqueeze(-1)  # Now shape [40, 4, 1, 1]
+            labels = F.interpolate(
+                labels, size=(256, 256), mode="bilinear", align_corners=False
+            )  # Now shape [40, 4, 256, 256, 1]
+
+            # labels = torch.zeros_like(inputs, dtype=torch.float32)
+            # labels[1] = labels_[-1]
+            # labels = batch["label"].to(device)
+            # print("===" * 20)
+            # print(f"inputs.shape:", inputs.shape)
+            # print(f"labels.shape:", labels.shape)
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -214,11 +236,16 @@ def main():
                 # generate random noise
                 noise_shape = list(inputs.shape)
                 noise = torch.randn(noise_shape, dtype=inputs.dtype).to(device)
+                # print(f"noise.shape:", noise.shape)
 
-                # use binary encoding to encode segmentation mask
-                controlnet_cond = binarize_labels(
-                    labels.as_tensor().to(torch.uint8)
-                ).float()
+                # controlnet_cond = binarize_labels(
+                #     labels.to(
+                #         torch.uint8
+                #     )  # Remove the as_tensor() call since labels is already a tensor
+                # ).float()
+                controlnet_cond = labels.float()
+                # print(f"controlnet_cond.shape:", controlnet_cond.shape)
+                # print("===" * 20)
 
                 # create timesteps
                 timesteps = torch.randint(
@@ -245,25 +272,46 @@ def main():
                     mid_block_additional_residual=mid_block_res_sample,
                 )
 
+            ##########################################################################
             if weighted_loss > 1.0:
                 weights = torch.ones_like(inputs).to(inputs.device)
-                roi = torch.zeros([noise_shape[0]] + [1] + noise_shape[2:]).to(
-                    inputs.device
-                )
+
+                # Create a mask in float32 format
+                roi_mask = torch.zeros_like(inputs[:, :1], dtype=torch.float32)
+
                 interpolate_label = F.interpolate(
                     labels, size=inputs.shape[2:], mode="nearest"
                 )
-                # assign larger weights for ROI (tumor)
+
+                # For each target label, add to the mask
                 for label in weighted_loss_label:
-                    roi[interpolate_label == label] = 1
-                weights[roi.repeat(1, inputs.shape[1], 1, 1, 1) == 1] = weighted_loss
+                    for channel in range(interpolate_label.shape[1]):
+                        # Create mask for this channel/label combination
+                        channel_mask = (
+                            interpolate_label[:, channel : channel + 1] == label
+                        ).float()
+                        # Add masks instead of OR operation
+                        roi_mask = roi_mask + channel_mask
+
+                # Convert to binary mask (any positive value becomes 1)
+                roi_mask = (roi_mask > 0).float()
+
+                # Apply the mask to weights
+                weights = weights.masked_fill(
+                    roi_mask.repeat(1, inputs.shape[1], 1, 1) > 0, weighted_loss
+                )
+
                 loss = (
                     F.l1_loss(noise_pred.float(), noise.float(), reduction="none")
                     * weights
                 ).mean()
             else:
                 loss = F.l1_loss(noise_pred.float(), noise.float())
+                ##########################################################################
 
+            # tqdm.write(f"[Epoch {epoch + 1}/{n_epochs}] Loss: {loss.item():.4f}")
+
+            # After loss calculation
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
@@ -271,22 +319,33 @@ def main():
             total_step += 1
 
             if rank == 0:
+                # Log metrics to wandb
+                wandb.log(
+                    {
+                        "train/loss": loss.detach().cpu().item(),
+                        "train/learning_rate": lr_scheduler.get_last_lr()[0],
+                        "train/epoch": epoch + 1,
+                        "train/step": total_step,
+                    }
+                )
+
+                # Existing logging code
                 batches_done = step + 1
                 batches_left = len(train_loader) - batches_done
                 time_left = timedelta(seconds=batches_left * (time.time() - prev_time))
                 prev_time = time.time()
-                logger.info(
-                    "\r[Epoch %d/%d] [Batch %d/%d] [LR: %.8f] [loss: %.4f] ETA: %s "
-                    % (
-                        epoch + 1,
-                        n_epochs,
-                        step + 1,
-                        len(train_loader),
-                        lr_scheduler.get_last_lr()[0],
-                        loss.detach().cpu().item(),
-                        time_left,
-                    )
-                )
+                # logger.info(
+                #     "\r[Epoch %d/%d] [Batch %d/%d] [LR: %.8f] [loss: %.4f] ETA: %s "
+                #     % (
+                #         epoch + 1,
+                #         n_epochs,
+                #         step + 1,
+                #         len(train_loader),
+                #         lr_scheduler.get_last_lr()[0],
+                #         loss.detach().cpu().item(),
+                #         time_left,
+                #     )
+                # )
             epoch_loss_ += loss.detach()
 
         epoch_loss = epoch_loss_ / (step + 1)
@@ -296,34 +355,128 @@ def main():
             dist.all_reduce(epoch_loss, op=torch.distributed.ReduceOp.AVG)
 
         if rank == 0:
-            # save controlnet only on master GPU (rank 0)
+            # Log epoch metrics to wandb
+            wandb.log(
+                {
+                    "train/epoch_loss": (
+                        epoch_loss
+                        if isinstance(epoch_loss, float)
+                        else epoch_loss.cpu().item()
+                    ),
+                    "train/epoch": epoch + 1,
+                }
+            )
+
+            # Save model and add to wandb
             controlnet_state_dict = (
                 controlnet.module.state_dict()
                 if world_size > 1
                 else controlnet.state_dict()
             )
+            model_path = f"{args.model_dir}/{args.exp_name}_current.pt"
             torch.save(
                 {
                     "epoch": epoch + 1,
                     "loss": epoch_loss,
                     "controlnet_state_dict": controlnet_state_dict,
                 },
-                f"{args.model_dir}/{args.exp_name}_current.pt",
+                model_path,
             )
 
             if epoch_loss < best_loss:
                 best_loss = epoch_loss
-                logger.info(f"best loss -> {best_loss}.")
+                best_model_path = f"{args.model_dir}/{args.exp_name}_best.pt"
                 torch.save(
                     {
                         "epoch": epoch + 1,
                         "loss": best_loss,
                         "controlnet_state_dict": controlnet_state_dict,
                     },
-                    f"{args.model_dir}/{args.exp_name}_best.pt",
+                    best_model_path,
                 )
 
-        torch.cuda.empty_cache()
+                # Convert to Python native type before logging
+                best_loss_value = (
+                    float(best_loss)
+                    if isinstance(best_loss, (torch.Tensor, MetaTensor))
+                    else best_loss
+                )
+                wandb.log({"train/best_loss": best_loss_value})
+                wandb.save(best_model_path)
+
+            torch.cuda.empty_cache()
+
+            # Validate occasionally (e.g., every 5 epochs or at the end)
+            if (
+                val_loader is not None
+                and (epoch % 5 == 0 or epoch == n_epochs - 1)
+                and rank == 0
+            ):
+                controlnet.eval()
+                val_loss = 0.0
+                with torch.no_grad():
+                    for val_batch in val_loader:
+                        val_inputs = (
+                            val_batch["latent"].squeeze(1).to(device) * scale_factor
+                        )
+                        val_labels = val_batch["label"].to(device)
+
+                        # Prepare labels same way as training
+                        val_labels = val_labels.unsqueeze(-1).unsqueeze(-1)
+                        val_labels = F.interpolate(
+                            val_labels,
+                            size=(256, 256),
+                            mode="bilinear",
+                            align_corners=False,
+                        )
+
+                        val_noise = torch.randn(
+                            val_inputs.shape, dtype=val_inputs.dtype
+                        ).to(device)
+                        val_timesteps = torch.randint(
+                            0,
+                            noise_scheduler.num_train_timesteps,
+                            (val_inputs.shape[0],),
+                            device=device,
+                        ).long()
+                        val_noisy_latent = noise_scheduler.add_noise(
+                            original_samples=val_inputs,
+                            noise=val_noise,
+                            timesteps=val_timesteps,
+                        )
+
+                        with autocast("cuda", enabled=True):
+                            val_controlnet_cond = val_labels.float()
+                            val_down_block_res_samples, val_mid_block_res_sample = (
+                                controlnet(
+                                    x=val_noisy_latent,
+                                    timesteps=val_timesteps,
+                                    controlnet_cond=val_controlnet_cond,
+                                )
+                            )
+                            val_noise_pred = unet(
+                                x=val_noisy_latent,
+                                timesteps=val_timesteps,
+                                down_block_additional_residuals=val_down_block_res_samples,
+                                mid_block_additional_residual=val_mid_block_res_sample,
+                            )
+
+                        batch_loss = F.l1_loss(
+                            val_noise_pred.float(), val_noise.float()
+                        )
+                        val_loss += batch_loss.item()
+
+                    val_loss /= len(val_loader)
+                    wandb.log(
+                        {"validation/loss": val_loss, "validation/epoch": epoch + 1}
+                    )
+                    # logger.info(f"Validation Loss: {val_loss:.4f}")
+                controlnet.train()
+
+    # Finish wandb run
+    if rank == 0:
+        wandb.finish()
+
     if use_ddp:
         dist.destroy_process_group()
 

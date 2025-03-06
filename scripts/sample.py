@@ -11,6 +11,7 @@
 
 import json
 import logging
+import math
 import os
 import time
 from datetime import datetime
@@ -142,6 +143,107 @@ def ldm_conditional_sample_one_image(
     return synthetic_images
 
 
+def ldm_conditional_sample_one_image_controlnet(
+    autoencoder,
+    diffusion_unet,
+    controlnet,
+    noise_scheduler,
+    scale_factor,
+    device,
+    combine_label_or,
+    latent_shape,
+    output_size,
+    noise_factor,
+    num_inference_steps=1000,
+):
+    """
+    Generate a single synthetic image using a latent diffusion model with controlnet.
+
+    Args:
+        autoencoder (nn.Module): The autoencoder model.
+        diffusion_unet (nn.Module): The diffusion U-Net model.
+        controlnet (nn.Module): The controlnet model.
+        noise_scheduler: The noise scheduler for the diffusion process.
+        scale_factor (float): Scaling factor for the latent space.
+        device (torch.device): The device to run the computation on.
+        combine_label_or (torch.Tensor): The combined label tensor.
+        latent_shape (tuple): The shape of the latent space.
+        output_size (tuple): The desired output size of the image.
+        noise_factor (float): Factor to scale the initial noise.
+        num_inference_steps (int): Number of inference steps for the diffusion process.
+
+    Returns:
+        tuple: A tuple containing the synthetic image and its corresponding label.
+    """
+    # CT image intensity range
+    a_min = 0
+    a_max = 255
+    # autoencoder output intensity range
+    b_min = -1.0
+    b_max = 1
+
+    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
+        device
+    )
+
+    # print(f"combine_label_or.shape:", combine_label_or.shape)
+
+    with torch.no_grad(), torch.amp.autocast("cuda"):
+        # generate segmentation mask
+        combine_label = combine_label_or.to(device)
+        # if (
+        #     output_size[0] != combine_label.shape[2]
+        #     or output_size[1] != combine_label.shape[3]
+        #     or output_size[2] != combine_label.shape[4]
+        # ):
+        #     logging.info(
+        #         "output_size is not a desired value. Need to interpolate the mask to match with output_size. The result image will be very low quality."
+        #     )
+        #     combine_label = torch.nn.functional.interpolate(
+        #         combine_label, size=output_size, mode="nearest"
+        #     )
+
+        # controlnet_cond_vis = binarize_labels(combine_label.as_tensor().long()).half()
+        controlnet_cond_vis = combine_label
+
+        # Generate random noise
+        latents = initialize_noise_latents(latent_shape, device) * noise_factor
+
+        # synthesize latents
+        noise_scheduler.set_timesteps(num_inference_steps=num_inference_steps)
+        for t in tqdm(noise_scheduler.timesteps, ncols=110):
+            # Get controlnet output
+            down_block_res_samples, mid_block_res_sample = controlnet(
+                x=latents,
+                timesteps=torch.Tensor((t,)).to(device),
+                controlnet_cond=controlnet_cond_vis,
+            )
+            latent_model_input = latents
+            noise_pred = diffusion_unet(
+                x=latent_model_input,
+                timesteps=torch.Tensor((t,)).to(device),
+                down_block_additional_residuals=down_block_res_samples,
+                mid_block_additional_residual=mid_block_res_sample,
+            )
+            latents, _ = noise_scheduler.step(noise_pred, t, latents)
+        del noise_pred
+        torch.cuda.empty_cache()
+
+        # decode latents to synthesized images
+        synthetic_images = recon_model(latents)
+        synthetic_images = torch.clip(synthetic_images, b_min, b_max).cpu()
+
+        ## post processing:
+        # project output to [0, 1]
+        synthetic_images = (synthetic_images - b_min) / (b_max - b_min)
+        # project output to [-1000, 1000]
+        synthetic_images = synthetic_images * (a_max - a_min) + a_min
+        # regularize background intensities
+        torch.cuda.empty_cache()
+
+    return synthetic_images, combine_label
+
+
 def check_input(
     body_region,
     anatomy_list,
@@ -169,11 +271,9 @@ def check_input(
         raise ValueError(
             f"The first two components of output_size need to be equal, yet got {output_size}."
         )
-    if (output_size[0] not in [256, 384, 512]) or (
-        output_size[2] not in [128, 256, 384, 512, 640, 768]
-    ):
+    if output_size[0] not in [256, 384, 512]:
         raise ValueError(
-            f"The output_size[0] have to be chosen from [256, 384, 512], and output_size[2] have to be chosen from [128, 256, 384, 512, 640, 768], yet got {output_size}."
+            f"The output_size[0] have to be chosen from [256, 384, 512], yet got {output_size}."
         )
 
     if spacing[0] != spacing[1]:

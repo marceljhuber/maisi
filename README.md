@@ -207,7 +207,7 @@ Please refer to [maisi_train_vae_tutorial.ipynb](maisi_train_vae_tutorial.ipynb)
 
 Please refer to [maisi_diff_unet_training_tutorial.ipynb](maisi_diff_unet_training_tutorial.ipynb) for the tutorial for MAISI diffusion model training.
 
-#### [3.3 3D ControlNet Training](./scripts/train_controlnet.py)
+#### [3.3 3D ControlNet Training](./scripts/train_controlnet_old.py)
 
 We provide a [training config](backup/configs_old/config_maisi_controlnet_train.json) executing finetuning for pretrained ControlNet with a new class (i.e., Kidney Tumor).
 When finetuning with other new class names, please update the `weighted_loss_label` in training config

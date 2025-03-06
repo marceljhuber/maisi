@@ -15,43 +15,63 @@ import logging
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
+import numpy as np
 from monai.data import decollate_batch, MetaTensor
 from monai.networks.utils import copy_model_state
 from monai.transforms import SaveImage
 from monai.utils import RankFilter
+import nibabel as nib
+from PIL import Image
+import random
 
-from .sample import check_input, ldm_conditional_sample_one_image
+from .sample import ldm_conditional_sample_one_image_controlnet
 from .utils import define_instance, prepare_maisi_controlnet_json_dataloader, setup_ddp
+
+from scripts.utils_data import setup_training
+from networks.autoencoderkl_maisi import AutoencoderKlMaisi
+
+
+def save_as_png(image_tensor, output_path):
+    """
+    Save a tensor as a PNG image.
+
+    Args:
+        image_tensor: The image tensor to save
+        output_path: Path to save the PNG image
+    """
+    # Convert tensor to numpy and normalize to 0-255 range
+    img_np = image_tensor.cpu().numpy()
+
+    # Normalize to 0-255 range
+    img_np = np.clip(img_np, 0, 1)
+    img_np = (img_np * 255).astype(np.uint8)
+
+    # If 3D volume, save middle slice
+    if len(img_np.shape) == 3:
+        middle_slice_idx = img_np.shape[0] // 2
+        img_np = img_np[middle_slice_idx, :, :]
+
+    # Create PIL image and save
+    img_pil = Image.fromarray(img_np)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    img_pil.save(output_path)
 
 
 @torch.inference_mode()
 def main():
     parser = argparse.ArgumentParser(description="maisi.controlnet.infer")
     parser.add_argument(
-        "-e",
-        "--environment-file",
-        default="./configs_old/environment_maisi_controlnet_train.json",
-        help="environment json file that stores environment path",
-    )
-    parser.add_argument(
-        "-c",
-        "--config-file",
-        default="./configs_old/config_maisi.json",
-        help="config json file that stores network hyper-parameters",
-    )
-    parser.add_argument(
-        "-t",
-        "--training-config",
-        default="./configs_old/config_maisi_controlnet_train.json",
-        help="config json file that stores training hyper-parameters",
-    )
-    parser.add_argument(
-        "-g", "--gpus", default=1, type=int, help="number of gpus per node"
+        "--config_path",
+        default="./configs/config_CONTROLNET_v1.json",
+        help="config json file that stores controlnet settings",
     )
     args = parser.parse_args()
+
+    args.gpus = 1
 
     # Step 0: configuration
     logger = logging.getLogger("maisi.controlnet.infer")
@@ -71,43 +91,54 @@ def main():
     logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
     logger.info(f"World_size: {world_size}")
 
-    with open(args.environment_file, "r") as env_file:
-        env_dict = json.load(env_file)
-    with open(args.config_file, "r") as config_file:
-        config_dict = json.load(config_file)
-    with open(args.training_config, "r") as training_config_file:
-        training_config_dict = json.load(training_config_file)
+    with open(args.config_path, "r") as f:
+        config = json.load(f)
+
+    env_dict = config["environment"]
+    model_def_dict = config["model_def"]
+    training_dict = config["training"]
+
+    # with open(args.environment_file, "r") as env_file:
+    #     env_dict = json.load(env_file)
+    # with open(args.config_file, "r") as config_file:
+    #     config_dict = json.load(config_file)
+    # with open(args.training_config, "r") as training_config_file:
+    #     training_config_dict = json.load(training_config_file)
 
     for k, v in env_dict.items():
         setattr(args, k, v)
-    for k, v in config_dict.items():
+    for k, v in model_def_dict.items():
         setattr(args, k, v)
-    for k, v in training_config_dict.items():
+    for k, v in training_dict.items():
         setattr(args, k, v)
 
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+
     # Step 1: set data loader
-    _, val_loader = prepare_maisi_controlnet_json_dataloader(
-        json_data_list=args.json_data_list,
-        data_base_dir=args.data_base_dir,
-        rank=rank,
-        world_size=world_size,
-        batch_size=args.controlnet_train["batch_size"],
-        cache_rate=args.controlnet_train["cache_rate"],
-        fold=args.controlnet_train["fold"],
-    )
+    # Use the setup_training function from utils_data instead
+
+    # Get device, run directories, and data loaders
+    device, run_dir, recon_dir, train_loader, val_loader = setup_training(config)
 
     # Step 2: define AE, diffusion model and controlnet
     # define AE
-    autoencoder = define_instance(args, "autoencoder_def").to(device)
     # load trained autoencoder model
     if args.trained_autoencoder_path is not None:
         if not os.path.exists(args.trained_autoencoder_path):
             raise ValueError("Please download the autoencoder checkpoint.")
-        autoencoder_ckpt = torch.load(args.trained_autoencoder_path)
-        autoencoder.load_state_dict(autoencoder_ckpt)
-        logger.info(
-            f"Load trained diffusion model from {args.trained_autoencoder_path}."
+
+        model_config = config["model"]["autoencoder"]
+
+        # Load model
+        autoencoder = AutoencoderKlMaisi(**model_config).to(device)
+        checkpoint = torch.load(
+            config["environment"]["trained_autoencoder_path"],
+            map_location=device,
+            weights_only=True,
         )
+        autoencoder.load_state_dict(checkpoint["autoencoder_state_dict"])
+        autoencoder.eval()
     else:
         logger.info("trained autoencoder model is not loaded.")
 
@@ -156,47 +187,92 @@ def main():
     controlnet.eval()
     unet.eval()
 
-    for batch in val_loader:
-        # get label mask
+    for batch_idx, batch in enumerate(val_loader):
+        # The GrayscaleDatasetLabels class already provides labels in format [batch_size, num_classes, H, W]
+        # These labels are already one-hot encoded in the dataset
         labels = batch["label"].to(device)
-        # get corresponding conditions
-        top_region_index_tensor = batch["top_region_index"].to(device)
-        bottom_region_index_tensor = batch["bottom_region_index"].to(device)
-        spacing_tensor = batch["spacing"].to(device)
-        out_spacing = tuple((batch["spacing"].squeeze().numpy() / 100).tolist())
-        # get target dimension
-        dim = batch["dim"]
-        output_size = (dim[0].item(), dim[1].item(), dim[2].item())
+
+        # Ensure the labels have the correct shape [batch_size, 4, 256, 256]
+        batch_size = labels.shape[0]
+        if labels.shape[1] != 4 or labels.shape[2] != 256 or labels.shape[3] != 256:
+            # Resize or reshape if necessary
+            resized_labels = torch.zeros((batch_size, 4, 256, 256), device=device)
+
+            # Copy available classes (up to 4)
+            num_classes = min(labels.shape[1], 4)
+            resized_labels[:, :num_classes] = labels[
+                :, :num_classes, : labels.shape[2], : labels.shape[3]
+            ]
+
+            labels = resized_labels
+
+        # Handle the new batch structure from GrayscaleDatasetLabels
+        # The new dataset might not provide these tensors, so we'll create defaults
+
+        # Handle dimensions from the new dataset format
+        if "dim" in batch:
+            dim = batch["dim"]
+            output_size = (dim[0].item(), dim[1].item(), dim[2].item())
+        else:
+            # Use image dimensions if available, otherwise use default size
+            if "image" in batch:
+                img_shape = batch["image"].shape
+                if len(img_shape) >= 3:
+                    # For 2D images: use [C, H, W] but add a depth dimension
+                    output_size = (img_shape[-2], img_shape[-1], 1)
+                else:
+                    # Default size if can't determine from image
+                    output_size = (256, 256, 1)
+            else:
+                # Default size
+                output_size = (256, 256, 1)
+
         # check if output_size and out_spacing are valid.
-        check_input(None, None, None, output_size, out_spacing, None)
+        # check_input(None, None, None, output_size, None)
+
+        latent_shape = [4, 64, 64]
+
         # generate a single synthetic image using a latent diffusion model with controlnet.
-        synthetic_images, _ = ldm_conditional_sample_one_image(
-            autoencoder,
-            unet,
-            controlnet,
-            noise_scheduler,
-            scale_factor,
-            device,
-            labels,
-            num_inference_steps=args.controlnet_infer["num_inference_steps"],
+        synthetic_images, _ = ldm_conditional_sample_one_image_controlnet(
+            autoencoder=autoencoder,
+            diffusion_unet=unet,
+            controlnet=controlnet,
+            noise_scheduler=noise_scheduler,
+            scale_factor=scale_factor,
+            device=device,
+            combine_label_or=labels,
+            latent_shape=latent_shape,
+            output_size=(256, 256, 1),
+            noise_factor=1,
+            num_inference_steps=1000,
         )
-        # save image/label pairs
-        labels = decollate_batch(batch)[0]["label"]
-        output_postfix = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        labels.meta["filename_or_obj"] = "sample.nii.gz"
-        synthetic_images = MetaTensor(synthetic_images.squeeze(0), meta=labels.meta)
-        img_saver = SaveImage(
-            output_dir=args.output_dir,
-            output_postfix=output_postfix + "_image",
-            separate_folder=False,
-        )
-        img_saver(synthetic_images)
-        label_saver = SaveImage(
-            output_dir=args.output_dir,
-            output_postfix=output_postfix + "_label",
-            separate_folder=False,
-        )
-        label_saver(labels)
+
+        # Modified: Save images as PNG
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M_%f")
+
+        for i in range(synthetic_images.shape[0]):
+            # Get class index for this sample (if available)
+            class_idx = i % 4  # Default to i mod 4
+            if "class_idx" in batch and i < len(batch["class_idx"]):
+                class_idx = batch["class_idx"][i].item()
+
+            # Get patient ID (if available)
+            patient_id = f"patient{batch_idx}_{i}"
+            if "patient_id" in batch and i < len(batch["patient_id"]):
+                patient_id = str(batch["patient_id"][i])
+
+            # Save synthetic image as PNG with class and patient info
+            image_filename = f"class{class_idx}-{patient_id}_{timestamp}_image.png"
+            image_path = os.path.join(args.output_dir, image_filename)
+            save_as_png(synthetic_images[i], image_path)
+
+            # Save label image as PNG
+            label_filename = f"class{class_idx}-{patient_id}_{timestamp}_label.png"
+            label_path = os.path.join(args.output_dir, label_filename)
+            save_as_png(labels[i], label_path)
+
+            logger.info(f"Saved sample {i} from batch {batch_idx} to {image_path}")
+
     if use_ddp:
         dist.destroy_process_group()
 
