@@ -302,18 +302,19 @@ def main():
                 batches_left = len(train_loader) - batches_done
                 time_left = timedelta(seconds=batches_left * (time.time() - prev_time))
                 prev_time = time.time()
-                logger.info(
-                    "\r[Epoch %d/%d] [Batch %d/%d] [LR: %.8f] [loss: %.4f] ETA: %s "
-                    % (
-                        epoch + 1,
-                        n_epochs,
-                        step + 1,
-                        len(train_loader),
-                        lr_scheduler.get_last_lr()[0],
-                        loss.detach().cpu().item(),
-                        time_left,
+                if (step - 1) % 500 == 0:
+                    logger.info(
+                        "\r[Epoch %d/%d] [Batch %d/%d] [LR: %.8f] [loss: %.4f] ETA: %s "
+                        % (
+                            epoch + 1,
+                            n_epochs,
+                            step + 1,
+                            len(train_loader),
+                            lr_scheduler.get_last_lr()[0],
+                            loss.detach().cpu().item(),
+                            time_left,
+                        )
                     )
-                )
             epoch_loss_ += loss.detach()
 
         epoch_loss = epoch_loss_ / (step + 1)

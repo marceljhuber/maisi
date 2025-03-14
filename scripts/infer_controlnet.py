@@ -209,6 +209,16 @@ def main():
 
             labels = resized_labels
 
+        print(f"Label:", labels.shape)
+
+        def find_ones_dimension(tensor):
+            """Returns index (0-3) of dimension that contains all 1s in tensor of shape (n,4,256,256)"""
+            sums = tensor.sum(dim=(0, 2, 3))
+            expected_sum = tensor.shape[0] * 256 * 256
+            return torch.where(sums == expected_sum)[0].item()
+
+        label = find_ones_dimension(labels)
+
         # Handle the new batch structure from GrayscaleDatasetLabels
         # The new dataset might not provide these tensors, so we'll create defaults
 
@@ -246,7 +256,7 @@ def main():
             combine_label_or=labels,
             latent_shape=latent_shape,
             noise_factor=1,
-            num_inference_steps=1000,
+            num_inference_steps=100,
         )
 
         # Rotate image to correct orientation (rotate 90 degrees clockwise to fix 270 degree rotation)
@@ -255,6 +265,7 @@ def main():
 
         # Modified: Save images as PNG
         timestamp = datetime.now().strftime("%Y%m%d_%H%M_%f")
+        timestamp += f"_{label}"
 
         # Save the generated image
         img_saver = SaveImage(
@@ -291,7 +302,6 @@ def main():
         #     logger.info(f"Saved sample {i} from batch {batch_idx} to {image_path}")
 
     if use_ddp:
-        print(f"Destroying Something.")
         dist.destroy_process_group()
 
 

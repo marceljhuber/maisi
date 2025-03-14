@@ -43,7 +43,7 @@ print_config()
 ########################################################################################################################
 # Step 1: Training Config Preparation
 ########################################################################################################################
-config_path = "./configs/config_CONTROLNET_v1.json"
+config_path = "./configs/config_CONTROLNET_v2.json"
 
 with open(config_path, "r") as f:
     config = json.load(f)

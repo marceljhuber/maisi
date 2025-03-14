@@ -202,6 +202,7 @@ def ldm_conditional_sample_one_image_controlnet(
 
         # controlnet_cond_vis = binarize_labels(combine_label.as_tensor().long()).half()
         controlnet_cond_vis = combine_label
+        print(f"controlnet_cond_vis.shape:", controlnet_cond_vis.shape)
 
         # Generate random noise
         latents = initialize_noise_latents(latent_shape, device) * noise_factor

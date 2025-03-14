@@ -1,6 +1,6 @@
 {
     "main": {
-        "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/test",
+        "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/train",
         "jobname": "boston",
         "run_dir": "./runs"
 
@@ -13,12 +13,12 @@
         "tfevent_path": "./outputs/tfevent",
         "trained_autoencoder_path": "./models/VAE/lima_best.pt",
         "trained_diffusion_path": "./models/DIFF/ida/runs_50.pt",
-        "trained_controlnet_path": null,
+        "trained_controlnet_path": "./models/boston_best.pt",
         "data_base_dir": ["./datasets/C4KC-KiTS_subset"],
         "json_data_list": ["./datasets/C4KC-KiTS_subset.json"]
     },
     "training": {
-        "batch_size": 8,
+        "batch_size": 1,
         "save_every": 2,
         "num_workers": 16,
         "controlnet_train": {
