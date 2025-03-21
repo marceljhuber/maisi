@@ -513,7 +513,6 @@ def main():
                 if wandb.run is not None:
                     wandb.save(f"{args.model_dir}/{args.exp_name}_best.pt")
 
-            logger.info(f"Generating visualization grid for epoch {epoch + 1}")
             generate_image_grid(
                 unet=unet,
                 controlnet=controlnet.module if world_size > 1 else controlnet,
