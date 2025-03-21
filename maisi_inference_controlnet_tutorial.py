@@ -8,49 +8,54 @@ import copy
 import json
 import os
 import subprocess
-
-from torch.utils.data import DataLoader
-
-import wandb
-
-import nibabel as nib
-import numpy as np
-from monai.config import print_config
-from monai.data import create_test_image_3d
-
+import argparse
 from datetime import datetime
 from pathlib import Path
+
 import torch
+from monai.config import print_config
+
 from scripts.utils_data import (
     set_random_seeds,
-    list_image_files,
-    setup_transforms,
-    setup_dataloaders,
-    GrayscaleDatasetLabels,
-    setup_training,
 )
 
+
+# Add argument parser
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train and infer ControlNet model")
+    parser.add_argument(
+        "--config_path",
+        type=str,
+        default="./configs/config_CONTROLNET_v2.json",
+        help="Path to the configuration file",
+    )
+    parser.add_argument(
+        "--num_images",
+        type=int,
+        default=1,
+        help="Number of images to generate during inference",
+    )
+    parser.add_argument(
+        "--label", type=int, default=0, help="Label to use for inference"
+    )
+    return parser.parse_args()
+
+
+# Parse arguments
+args = parse_args()
 print_config()
-
-
-########################################################################################################################
-# Step 1: Training Data Preparation
-########################################################################################################################
-
-########################################################################################################################
 
 
 ########################################################################################################################
 # Step 1: Training Config Preparation
 ########################################################################################################################
-config_path = "./configs/config_CONTROLNET_v2.json"
+config_path = args.config_path
 
 with open(config_path, "r") as f:
     config = json.load(f)
 
 # Prepare training
 set_random_seeds()
-# device, run_dir, recon_dir, train_loader = setup_training(config)
 
 # Load environment configuration, model configuration and model definition
 env_config = config["environment"]
@@ -97,14 +102,9 @@ recon_dir = run_dir / "reconstructions"
 recon_dir.mkdir(exist_ok=True)
 
 # Set up directories based on configurations
-# env_config_out["data_base_dir"] = dataroot_dir
-# env_config_out["json_data_list"] = datalist_file
 env_config_out["model_dir"] = os.path.join(run_dir, env_config_out["model_dir"])
 env_config_out["output_dir"] = os.path.join(run_dir, env_config_out["output_dir"])
 env_config_out["tfevent_path"] = os.path.join(run_dir, env_config_out["tfevent_path"])
-# We don't load pretrained checkpoints for demo
-# env_config_out["trained_autoencoder_path"] = None
-# env_config_out["trained_diffusion_path"] = None
 env_config_out["trained_controlnet_path"] = None
 env_config_out["exp_name"] = "tutorial_training_example"
 
@@ -124,8 +124,6 @@ train_config_out["controlnet_train"]["weighted_loss"] = 1
 # We also set weighted_loss_label to None, which indicates the list of label indices that
 # we want to apply more penalty during training.
 train_config_out["controlnet_train"]["weighted_loss_label"] = [None]
-# We set it as a small number for demo
-# train_config_out["controlnet_infer"]["num_inference_steps"] = 1
 
 # Dump the configs to the run_dir
 env_config_filepath = os.path.join(run_dir, "config_environment.json")
@@ -188,25 +186,15 @@ def run_torchrun(module, module_args, num_gpus=1):
 ########################################################################################################################
 # Step 3: Train the Model
 ########################################################################################################################
-# logger.info("Training the model...")
-# module = "scripts.train_controlnet"
-# module_args = [
-#     "--config",
-#     config_path,  # Use the config path instead of the config dictionary
-#     # "--config-file",
-#     # model_def_filepath,
-#     # "--training-config",
-#     # train_config_filepath,
-# ]
-#
-# run_torchrun(module, module_args, num_gpus=num_gpus)
-
-# # Run inference
-# logger.info("Inference...")
+# Run inference
 module = "scripts.infer_controlnet"
 module_args = [
     "--config_path",
     config_path,
+    "--num_images",
+    str(args.num_images),
+    "--label",
+    str(args.label),
 ]
 
 run_torchrun(module, module_args, num_gpus=num_gpus)

@@ -11,7 +11,6 @@
 
 import json
 import logging
-import math
 import os
 import time
 from datetime import datetime
@@ -118,20 +117,6 @@ def ldm_conditional_sample_one_image(
         synthetic_images = recon_model(latents)
 
         ################################################################################################################
-        # # Keep in [-1,1] range as per training
-        # synthetic_images = torch.clip(synthetic_images, -1, 1)
-        #
-        # # Denormalize from [-1,1] to [0,1]
-        # synthetic_images = (synthetic_images + 1) / 2.0
-        #
-        # # Convert to uint8 range [0,255]
-        # synthetic_images = (synthetic_images * 255).type(torch.uint8)
-        ################################################################################################################
-        # Scale directly from [-1,1] to [0,255]
-        # synthetic_images = (
-        #     ((synthetic_images + 1.0) * 127.5).clamp(0, 255).to(torch.uint8)
-        # )
-        ################################################################################################################
         synthetic_images = torch.clip(synthetic_images, b_min, b_max).cpu()
         # project output to [0, 1]
         synthetic_images = (synthetic_images - b_min) / (b_max - b_min)
@@ -186,12 +171,6 @@ def ldm_conditional_sample_one_image_controlnet(
     recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
         device
     )
-
-    # print(f"S: 01")
-
-    # Before the inference loop
-    # controlnet.enable_gradient_checkpointing()
-    # diffusion_unet.enable_gradient_checkpointing()
     # Add at various points to track memory
     # print(f"Memory allocated: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
     # print(f"Memory reserved: {torch.cuda.memory_reserved() / 1e9:.2f} GB")
@@ -202,21 +181,14 @@ def ldm_conditional_sample_one_image_controlnet(
 
         # controlnet_cond_vis = binarize_labels(combine_label.as_tensor().long()).half()
         controlnet_cond_vis = combine_label
-        print(f"controlnet_cond_vis.shape:", controlnet_cond_vis.shape)
+        # print(f"controlnet_cond_vis.shape:", controlnet_cond_vis.shape)
 
         # Generate random noise
         latents = initialize_noise_latents(latent_shape, device) * noise_factor
 
         # synthesize latents
         noise_scheduler.set_timesteps(num_inference_steps=num_inference_steps)
-        # print(f"S: 02")
-        # for t in tqdm(noise_scheduler.timesteps, ncols=110):
-        total_steps = len(noise_scheduler.timesteps)
         for step_idx, t in enumerate(noise_scheduler.timesteps):
-            # Print progress every 100 steps
-            # if step_idx % 100 == 0 or step_idx == total_steps - 1:
-            # print(f"Step {step_idx + 1}/{total_steps} completed")
-
             # Get controlnet output
             down_block_res_samples, mid_block_res_sample = controlnet(
                 x=latents,
@@ -238,7 +210,7 @@ def ldm_conditional_sample_one_image_controlnet(
         synthetic_images = recon_model(latents)
         synthetic_images = torch.clip(synthetic_images, b_min, b_max).cpu()
 
-        ## post processing:
+        # post processing:
         # project output to [0, 1]
         synthetic_images = (synthetic_images - b_min) / (b_max - b_min)
         # project output to [-1, 1]

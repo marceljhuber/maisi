@@ -15,24 +15,20 @@ import logging
 import os
 import sys
 from datetime import datetime
-from pathlib import Path
 
+import numpy as np
 import torch
 import torch.distributed as dist
-import numpy as np
-from monai.data import decollate_batch, MetaTensor
+from PIL import Image
 from monai.networks.utils import copy_model_state
 from monai.transforms import SaveImage
 from monai.utils import RankFilter
-import nibabel as nib
-from PIL import Image
-import random
+from tqdm import tqdm
 
-from .sample import ldm_conditional_sample_one_image_controlnet
-from .utils import define_instance, prepare_maisi_controlnet_json_dataloader, setup_ddp
-
-from scripts.utils_data import setup_training
 from networks.autoencoderkl_maisi import AutoencoderKlMaisi
+from scripts.utils_data import setup_training
+from .sample import ldm_conditional_sample_one_image_controlnet
+from .utils import define_instance, setup_ddp
 
 
 def save_as_png(image_tensor, output_path):
@@ -69,6 +65,15 @@ def main():
         default="./configs/config_CONTROLNET_v1.json",
         help="config json file that stores controlnet settings",
     )
+    parser.add_argument(
+        "--num_images",
+        type=int,
+        default=1,
+        help="Number of images to generate during inference",
+    )
+    parser.add_argument(
+        "--label", type=int, default=0, help="Label to use for inference"
+    )
     args = parser.parse_args()
 
     args.gpus = 1
@@ -98,13 +103,6 @@ def main():
     model_def_dict = config["model_def"]
     training_dict = config["training"]
 
-    # with open(args.environment_file, "r") as env_file:
-    #     env_dict = json.load(env_file)
-    # with open(args.config_file, "r") as config_file:
-    #     config_dict = json.load(config_file)
-    # with open(args.training_config, "r") as training_config_file:
-    #     training_config_dict = json.load(training_config_file)
-
     for k, v in env_dict.items():
         setattr(args, k, v)
     for k, v in model_def_dict.items():
@@ -113,16 +111,13 @@ def main():
         setattr(args, k, v)
 
     # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
+    output_dir = os.path.join(args.output_dir, datetime.today().strftime("%m%d"))
+    os.makedirs(output_dir, exist_ok=True)
 
-    # Step 1: set data loader
-    # Use the setup_training function from utils_data instead
-
-    # Get device, run directories, and data loaders
+    # Step 1: Get device, run directories, and data loaders
     device, run_dir, recon_dir, train_loader, val_loader = setup_training(config)
 
     # Step 2: define AE, diffusion model and controlnet
-    # define AE
     # load trained autoencoder model
     if args.trained_autoencoder_path is not None:
         if not os.path.exists(args.trained_autoencoder_path):
@@ -187,63 +182,16 @@ def main():
     controlnet.eval()
     unet.eval()
 
-    # output_filenames = []
+    latent_shape = [4, 64, 64]
 
-    for batch_idx, batch in enumerate(val_loader):
-        print(f"Starting batch {batch_idx}/{len(val_loader)}.")
-        # The GrayscaleDatasetLabels class already provides labels in format [batch_size, num_classes, H, W]
-        # These labels are already one-hot encoded in the dataset
-        labels = batch["label"].to(device)
+    def create_label_tensor(label):
+        tensor = torch.zeros(1, 4, 256, 256)
+        tensor[0, label, :, :] = 1.0
+        return tensor
 
-        # Ensure the labels have the correct shape [batch_size, 4, 256, 256]
-        batch_size = labels.shape[0]
-        if labels.shape[1] != 4 or labels.shape[2] != 256 or labels.shape[3] != 256:
-            # Resize or reshape if necessary
-            resized_labels = torch.zeros((batch_size, 4, 256, 256), device=device)
-
-            # Copy available classes (up to 4)
-            num_classes = min(labels.shape[1], 4)
-            resized_labels[:, :num_classes] = labels[
-                :, :num_classes, : labels.shape[2], : labels.shape[3]
-            ]
-
-            labels = resized_labels
-
-        print(f"Label:", labels.shape)
-
-        def find_ones_dimension(tensor):
-            """Returns index (0-3) of dimension that contains all 1s in tensor of shape (n,4,256,256)"""
-            sums = tensor.sum(dim=(0, 2, 3))
-            expected_sum = tensor.shape[0] * 256 * 256
-            return torch.where(sums == expected_sum)[0].item()
-
-        label = find_ones_dimension(labels)
-
-        # Handle the new batch structure from GrayscaleDatasetLabels
-        # The new dataset might not provide these tensors, so we'll create defaults
-
-        # Handle dimensions from the new dataset format
-        if "dim" in batch:
-            dim = batch["dim"]
-            output_size = (dim[0].item(), dim[1].item(), dim[2].item())
-        else:
-            # Use image dimensions if available, otherwise use default size
-            if "image" in batch:
-                img_shape = batch["image"].shape
-                if len(img_shape) >= 3:
-                    # For 2D images: use [C, H, W] but add a depth dimension
-                    output_size = (img_shape[-2], img_shape[-1], 1)
-                else:
-                    # Default size if can't determine from image
-                    output_size = (256, 256, 1)
-            else:
-                # Default size
-                output_size = (256, 256, 1)
-
-        # check if output_size and out_spacing are valid.
-        # check_input(None, None, None, output_size, None)
-
-        latent_shape = [4, 64, 64]
+    print()
+    print(f"==" * 50)
+    for _ in tqdm(range(args.num_images), desc="Generating images", unit="image"):
 
         # generate a single synthetic image using a latent diffusion model with controlnet.
         synthetic_image, _ = ldm_conditional_sample_one_image_controlnet(
@@ -253,53 +201,29 @@ def main():
             noise_scheduler=noise_scheduler,
             scale_factor=scale_factor,
             device=device,
-            combine_label_or=labels,
+            combine_label_or=create_label_tensor(args.label),
             latent_shape=latent_shape,
             noise_factor=1,
-            num_inference_steps=100,
+            num_inference_steps=1000,
         )
 
         # Rotate image to correct orientation (rotate 90 degrees clockwise to fix 270 degree rotation)
         # For a tensor with shape [batch, channel, height, width]
         synthetic_image = synthetic_image.transpose(2, 3).flip(2)
 
-        # Modified: Save images as PNG
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M_%f")
-        timestamp += f"_{label}"
+        # Save images as PNG
+        timestamp = datetime.now().strftime("%m%d_%H%M%S")
+        timestamp += f"_{args.label}"
 
         # Save the generated image
         img_saver = SaveImage(
-            output_dir=args.output_dir,
+            output_dir=output_dir,
             output_postfix=timestamp,
             output_ext=".png",
             separate_folder=False,
+            channel_dim=0,  # Specifies channel dimension but doesn't add to filename
         )
         img_saver(synthetic_image[0])
-
-        # output_filenames.append(synthetic_image_filename)
-
-        # print(f"    For i in range:", synthetic_images.shape[0])
-        # for i in range(synthetic_images.shape[0]):
-        #     # Get class index for this sample (if available)
-        #     class_idx = i % 4  # Default to i mod 4
-        #     if "class_idx" in batch and i < len(batch["class_idx"]):
-        #         class_idx = batch["class_idx"][i].item()
-        #
-        #     # Get patient ID (if available)
-        #     patient_id = f"patient{batch_idx}_{i}"
-        #     if "patient_id" in batch and i < len(batch["patient_id"]):
-        #         patient_id = str(batch["patient_id"][i])
-        #
-        #     # Save synthetic image as PNG with class and patient info
-        #     image_filename = f"class{class_idx}-{patient_id}_{timestamp}_image.png"
-        #     image_path = os.path.join(args.output_dir, image_filename)
-        #
-        #     # Save label image as PNG
-        #     label_filename = f"class{class_idx}-{patient_id}_{timestamp}_label.png"
-        #     label_path = os.path.join(args.output_dir, label_filename)
-        #     save_as_png(labels[i], label_path)
-        #
-        #     logger.info(f"Saved sample {i} from batch {batch_idx} to {image_path}")
 
     if use_ddp:
         dist.destroy_process_group()
