@@ -28,6 +28,13 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from monai.data.meta_tensor import MetaTensor
 
+# Add these imports at the top of the file
+import matplotlib.pyplot as plt
+import numpy as np
+from torchvision.utils import make_grid
+import random
+from tqdm import tqdm
+
 from .utils import (
     binarize_labels,
     define_instance,
@@ -37,6 +44,130 @@ from .utils import (
 
 from scripts.utils_data import setup_training, create_latent_dataloaders
 from scripts.utils_data import setup_training
+
+
+def generate_image_grid(
+    unet,
+    controlnet,
+    noise_scheduler,
+    device,
+    epoch,
+    save_dir,
+    logger,
+    scale_factor=1.0,
+    num_seeds=10,
+    num_classes=4,
+):
+    """
+    Generate a grid of images for visualization after each epoch.
+
+    Args:
+        unet: The trained diffusion UNet model
+        controlnet: The ControlNet model being trained
+        noise_scheduler: Noise scheduler for the diffusion process
+        device: The device to run inference on
+        epoch: Current epoch number
+        save_dir: Directory to save the grid image
+        scale_factor: Scale factor for the latent space
+        num_seeds: Number of different seeds to use (columns)
+        num_classes: Number of different classes to visualize (rows)
+    """
+    controlnet.eval()
+    unet.eval()
+
+    # Create a directory for visualizations if it doesn't exist
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Set up inference timesteps
+    noise_scheduler.set_timesteps(1000, device=device)
+
+    # Set fixed seeds for reproducibility across epochs
+    fixed_seeds = [42, 1337, 7, 13, 999, 123, 456, 789, 101, 202]
+    assert len(fixed_seeds) >= num_seeds, "Not enough fixed seeds provided"
+
+    # Initialize grid to store generated images
+    all_images = []
+
+    # Create conditions for each class (one-hot encoded)
+    with torch.no_grad():
+        for class_idx in range(num_classes):
+            class_images = []
+
+            # Create condition for this class
+            condition = torch.zeros(
+                (1, num_classes, 256, 256), dtype=torch.float32, device=device
+            )
+            condition[0, class_idx] = 1.0  # Set the corresponding class channel to 1
+
+            for seed_idx in range(num_seeds):
+                logger.info(f"{class_idx}-{seed_idx}")
+                # Set seed for reproducibility
+                torch.manual_seed(fixed_seeds[seed_idx])
+                random.seed(fixed_seeds[seed_idx])
+                np.random.seed(fixed_seeds[seed_idx])
+
+                # Start from random noise
+                latent = torch.randn((1, 4, 64, 64), device=device) * scale_factor
+
+                # Denoise step by step
+                for i, t in enumerate(noise_scheduler.timesteps):
+                    # Get timestep
+                    timesteps = torch.tensor([t], device=device)
+
+                    # Get controlnet output
+                    down_block_res_samples, mid_block_res_sample = controlnet(
+                        x=latent, timesteps=timesteps, controlnet_cond=condition
+                    )
+
+                    # Get noise prediction from diffusion unet
+                    noise_pred = unet(
+                        x=latent,
+                        timesteps=timesteps,
+                        down_block_additional_residuals=down_block_res_samples,
+                        mid_block_additional_residual=mid_block_res_sample,
+                    )
+
+                    # Update latent
+                    # Based on your DDPMScheduler implementation, it returns a tuple of (pred_prev_sample, pred_original_sample)
+                    pred_prev_sample, _ = noise_scheduler.step(noise_pred, t, latent)
+                    latent = pred_prev_sample
+
+                    # Clear CUDA cache every few steps to prevent memory buildup
+                    if i % 10 == 0:
+                        torch.cuda.empty_cache()
+
+                # Normalize latent to [0, 1] for visualization
+                latent_norm = (latent - latent.min()) / (latent.max() - latent.min())
+                class_images.append(latent_norm)
+
+            # Collect all images for this class
+            all_images.extend(class_images)
+
+    # Create a grid from all generated images
+    grid = make_grid(torch.cat(all_images, dim=0), nrow=num_seeds, normalize=True)
+    grid_np = grid.cpu().permute(1, 2, 0).numpy()
+
+    # Save the grid
+    plt.figure(figsize=(20, 10))
+    plt.imshow(grid_np)
+    plt.axis("off")
+    plt.title(f"Epoch {epoch + 1} - Image Grid (4 classes × 10 seeds)")
+
+    # Add class labels on the left
+    for i in range(num_classes):
+        plt.text(
+            -10,
+            i * (grid_np.shape[0] / num_classes) + (grid_np.shape[0] / num_classes) / 2,
+            f"Class {i}",
+            va="center",
+            ha="right",
+        )
+
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/epoch_{epoch + 1}_grid.png", dpi=150, bbox_inches="tight")
+    plt.close()
+
+    controlnet.train()
 
 
 def main():
@@ -105,6 +236,19 @@ def main():
     # device, run_dir, recon_dir, train_loader, val_loader = setup_training(config)
     print(f"latent_dir:", args.latent_dir)
     train_loader, val_loader = create_latent_dataloaders(args.latent_dir)
+    train_loader = torch.utils.data.DataLoader(
+        list(train_loader.dataset)[: 100 * train_loader.batch_size],
+        batch_size=train_loader.batch_size,
+        shuffle=True,
+    )
+
+    args.model_dir = os.path.join(
+        args.model_dir,
+        "CONTROLNET",
+        args.exp_name,
+    )
+    vis_dir = os.path.join(args.model_dir, f"visualizations")
+    os.makedirs(vis_dir, exist_ok=True)
 
     # Step 2: define diffusion model and controlnet
     # define diffusion Model
@@ -336,7 +480,7 @@ def main():
                     "loss": epoch_loss,
                     "controlnet_state_dict": controlnet_state_dict,
                 },
-                f"{args.model_dir}/{args.exp_name}_current.pt",
+                f"{args.model_dir}/{args.exp_name}_{epoch}.pt",
             )
 
             if epoch_loss < best_loss:
@@ -350,6 +494,20 @@ def main():
                     },
                     f"{args.model_dir}/{args.exp_name}_best.pt",
                 )
+
+            logger.info(f"Generating visualization grid for epoch {epoch + 1}")
+            generate_image_grid(
+                unet=unet,
+                controlnet=controlnet.module if world_size > 1 else controlnet,
+                noise_scheduler=noise_scheduler,
+                device=device,
+                epoch=epoch,
+                save_dir=vis_dir,
+                logger=logger,
+                scale_factor=scale_factor,
+                num_seeds=10,
+                num_classes=4,
+            )
 
         torch.cuda.empty_cache()
     if use_ddp:

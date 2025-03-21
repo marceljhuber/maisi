@@ -356,7 +356,6 @@ def diff_model_train(
     train_files = load_latents(args.latents_path)
     train_loader = prepare_data(
         train_files,
-        # train_files[0:1000],
         device,
         args.diffusion_unet_train["cache_rate"],
         batch_size=args.diffusion_unet_train["batch_size"],
