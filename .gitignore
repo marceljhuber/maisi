@@ -6,3 +6,4 @@
 /backup/
 /temp_work_dir/
 *.png
+/.ipynb_checkpoints/
