@@ -1,31 +1,23 @@
 import argparse
-import glob
 import json
-import os
-import random
 import warnings
 from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
-import wandb
-from PIL import Image
 from monai.config import print_config
-from monai.data import DataLoader
 from monai.losses.adversarial_loss import PatchAdversarialLoss
 from monai.losses.perceptual import PerceptualLoss
 from monai.networks.nets import PatchDiscriminator
 from torch.cuda.amp import GradScaler, autocast
 from torch.nn import L1Loss, MSELoss
 from torch.optim import lr_scheduler
-from torch.utils.data import Dataset
-from torchvision import transforms
 from tqdm import tqdm
 
+import wandb
 from networks.autoencoderkl_maisi import AutoencoderKlMaisi
-from scripts.utils import KL_loss, dynamic_infer
+from scripts.utils import KL_loss
 from scripts.utils_data import (
     set_random_seeds,
     setup_transforms,
@@ -302,7 +294,7 @@ def main():
     train_images, val_images = split_train_val_by_patient(image_files)
     print(f"Found {len(train_images)} train images.")
     train_transform, val_transform = setup_transforms()
-    # train_transform = val_transform  # No train transform #TODO
+    train_transform = val_transform  # No train transform #TODO
     train_loader, val_loader = setup_dataloaders(
         train_images, val_images, train_transform, val_transform, config
     )
