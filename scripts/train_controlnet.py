@@ -13,37 +13,31 @@ import argparse
 import json
 import logging
 import os
+import random
 import sys
 import time
 from datetime import timedelta
-from pathlib import Path
 
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from monai.networks.utils import copy_model_state
 from monai.utils import RankFilter
+
+# from torch.cuda.amp import GradScaler, autocast
 from torch.amp import GradScaler, autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
-from monai.data.meta_tensor import MetaTensor
-
-# Add these imports at the top of the file
-import matplotlib.pyplot as plt
-import numpy as np
 from torchvision.utils import make_grid
-import random
-from tqdm import tqdm
 
+import wandb
+from scripts.utils_data import create_latent_dataloaders
 from .utils import (
-    binarize_labels,
     define_instance,
-    prepare_maisi_controlnet_json_dataloader,
     setup_ddp,
 )
-
-from scripts.utils_data import setup_training, create_latent_dataloaders
-from scripts.utils_data import setup_training
 
 
 def generate_image_grid(
@@ -91,6 +85,7 @@ def generate_image_grid(
     # Create conditions for each class (one-hot encoded)
     with torch.no_grad():
         for class_idx in range(num_classes):
+            logger.info(f"Generating images of class {class_idx}.")
             class_images = []
 
             # Create condition for this class
@@ -100,7 +95,6 @@ def generate_image_grid(
             condition[0, class_idx] = 1.0  # Set the corresponding class channel to 1
 
             for seed_idx in range(num_seeds):
-                # logger.info(f"{class_idx}-{seed_idx}")
                 # Set seed for reproducibility
                 torch.manual_seed(fixed_seeds[seed_idx])
                 random.seed(fixed_seeds[seed_idx])
@@ -128,7 +122,6 @@ def generate_image_grid(
                     )
 
                     # Update latent
-                    # Based on your DDPMScheduler implementation, it returns a tuple of (pred_prev_sample, pred_original_sample)
                     pred_prev_sample, _ = noise_scheduler.step(noise_pred, t, latent)
                     latent = pred_prev_sample
 
@@ -136,9 +129,12 @@ def generate_image_grid(
                     if i % 10 == 0:
                         torch.cuda.empty_cache()
 
-                # Normalize latent to [0, 1] for visualization
-                latent_norm = (latent - latent.min()) / (latent.max() - latent.min())
-                class_images.append(latent_norm)
+                # Normalize latent to [0, 1] for visualization and average across color channels
+                latent_gray = latent[0].mean(dim=0, keepdim=True)
+                latent_norm = (latent_gray - latent_gray.min()) / (
+                    latent_gray.max() - latent_gray.min()
+                )
+                class_images.append(latent_norm.unsqueeze(0))
 
             # Collect all images for this class
             all_images.extend(class_images)
@@ -174,27 +170,9 @@ def main():
     parser = argparse.ArgumentParser(description="maisi.controlnet.training")
     parser.add_argument(
         "--config_path",
-        default="./configs/config_CONTROLNET_v2.json",
+        default="./configs/config_CONTROLNET_canada.json",
         help="config json file that stores controlnet settings",
     )
-    # parser.add_argument(
-    #     "-e",
-    #     "--environment-file",
-    #     default="./configs_old/environment_maisi_controlnet_train.json",
-    #     help="environment json file that stores environment path",
-    # )
-    # parser.add_argument(
-    #     "-c",
-    #     "--config-file",
-    #     default="./configs_old/config_maisi.json",
-    #     help="config json file that stores network hyper-parameters",
-    # )
-    # parser.add_argument(
-    #     "-t",
-    #     "--training-config",
-    #     default="./configs_old/config_maisi_controlnet_train.json",
-    #     help="config json file that stores training hyper-parameters",
-    # )
     parser.add_argument(
         "-g", "--gpus", default=1, type=int, help="number of gpus per node"
     )
@@ -221,6 +199,21 @@ def main():
     logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
     logger.info(f"World_size: {world_size}")
 
+    # Initialize wandb only for rank 0 process when using DDP
+    if rank == 0 and wandb.run is None:
+        wandb_config = {
+            "environment": config["environment"],
+            "model_def": config["model_def"],
+            "training": config["training"],
+        }
+        wandb.init(
+            project="controlnet-training",
+            name=config["environment"].get("exp_name", "controlnet_training"),
+            config=wandb_config,
+            resume="allow",
+        )
+        logger.info("Initialized wandb for tracking")
+
     env_dict = config["environment"]
     model_def_dict = config["model_def"]
     training_dict = config["training"]
@@ -237,7 +230,7 @@ def main():
     print(f"latent_dir:", args.latent_dir)
     train_loader, val_loader = create_latent_dataloaders(args.latent_dir)
     # train_loader = torch.utils.data.DataLoader(
-    #     list(train_loader.dataset)[: 100 * train_loader.batch_size],
+    #     list(train_loader.dataset)[: 500 * train_loader.batch_size],
     #     batch_size=train_loader.batch_size,
     #     shuffle=True,
     # )
@@ -323,6 +316,7 @@ def main():
 
     # Step 4: training
     n_epochs = args.controlnet_train["n_epochs"]
+    # scaler = GradScaler()
     scaler = GradScaler("cuda")
     total_step = 0
     best_loss = 1e4
@@ -337,10 +331,10 @@ def main():
     prev_time = time.time()
     for epoch in range(n_epochs):
         epoch_loss_ = 0
+        batch_times = []
+        losses = []
         for step, batch in enumerate(train_loader):
-            # get image embedding and label mask and scale image embedding by the provided scale_factor
-            # inputs = batch["image"].to(device) * scale_factor
-            # labels = batch["label"].to(device)
+            batch_start = time.time()
             inputs = batch["latent"].squeeze(1).to(device) * scale_factor
             labels = batch["label"].to(device)
 
@@ -349,29 +343,14 @@ def main():
                 labels, size=(256, 256), mode="bilinear", align_corners=False
             )  # Now shape [40, 4, 256, 256, 1]
 
-            # labels = torch.zeros_like(inputs, dtype=torch.float32)
-            # labels[1] = labels_[-1]
-            # labels = batch["label"].to(device)
-            # print("===" * 20)
-            # print(f"inputs.shape:", inputs.shape)
-            # print(f"labels.shape:", labels.shape)
-
             optimizer.zero_grad(set_to_none=True)
 
+            # with autocast(, enabled=True):
             with autocast("cuda", enabled=True):
-                # generate random noise
                 noise_shape = list(inputs.shape)
                 noise = torch.randn(noise_shape, dtype=inputs.dtype).to(device)
-                # print(f"noise.shape:", noise.shape)
 
-                # controlnet_cond = binarize_labels(
-                #     labels.to(
-                #         torch.uint8
-                #     )  # Remove the as_tensor() call since labels is already a tensor
-                # ).float()
                 controlnet_cond = labels.float()
-                # print(f"controlnet_cond.shape:", controlnet_cond.shape)
-                # print("===" * 20)
 
                 # create timesteps
                 timesteps = torch.randint(
@@ -441,7 +420,24 @@ def main():
             lr_scheduler.step()
             total_step += 1
 
+            # Calculate batch processing time
+            batch_end = time.time()
+            batch_time = batch_end - batch_start
+            batch_times.append(batch_time)
+            losses.append(loss.item())
+
             if rank == 0:
+                # Log metrics to wandb every 50 steps
+                if step % 50 == 0 and wandb.run is not None:
+                    wandb.log(
+                        {
+                            "train/loss": loss.item(),
+                            "train/learning_rate": lr_scheduler.get_last_lr()[0],
+                            "train/batch_time": batch_time,
+                            "train/step": total_step,
+                        }
+                    )
+
                 batches_done = step + 1
                 batches_left = len(train_loader) - batches_done
                 time_left = timedelta(seconds=batches_left * (time.time() - prev_time))
@@ -462,12 +458,26 @@ def main():
             epoch_loss_ += loss.detach()
 
         epoch_loss = epoch_loss_ / (step + 1)
+        avg_batch_time = sum(batch_times) / len(batch_times)
+        avg_loss = sum(losses) / len(losses)
 
         if use_ddp:
             dist.barrier()
             dist.all_reduce(epoch_loss, op=torch.distributed.ReduceOp.AVG)
 
         if rank == 0:
+            # Log to wandb
+            if wandb.run is not None:
+                wandb.log(
+                    {
+                        "epoch": epoch + 1,
+                        "epoch/avg_loss": avg_loss,
+                        "epoch/avg_batch_time": avg_batch_time,
+                        "epoch/learning_rate": lr_scheduler.get_last_lr()[0],
+                        "epoch/best_loss": min(best_loss, avg_loss),
+                    }
+                )
+
             # save controlnet only on master GPU (rank 0)
             controlnet_state_dict = (
                 controlnet.module.state_dict()
@@ -483,6 +493,10 @@ def main():
                 f"{args.model_dir}/{args.exp_name}_{epoch}.pt",
             )
 
+            # Log model checkpoint to wandb
+            if wandb.run is not None:
+                wandb.save(f"{args.model_dir}/{args.exp_name}_{epoch}.pt")
+
             if epoch_loss < best_loss:
                 best_loss = epoch_loss
                 logger.info(f"best loss -> {best_loss}.")
@@ -495,6 +509,10 @@ def main():
                     f"{args.model_dir}/{args.exp_name}_best.pt",
                 )
 
+                # Log best model to wandb
+                if wandb.run is not None:
+                    wandb.save(f"{args.model_dir}/{args.exp_name}_best.pt")
+
             logger.info(f"Generating visualization grid for epoch {epoch + 1}")
             generate_image_grid(
                 unet=unet,
@@ -505,11 +523,16 @@ def main():
                 save_dir=vis_dir,
                 logger=logger,
                 scale_factor=scale_factor,
-                num_seeds=10,
+                num_seeds=1,
                 num_classes=4,
             )
 
         torch.cuda.empty_cache()
+
+    # Close wandb run if it was initialized
+    if rank == 0 and wandb.run is not None:
+        wandb.finish()
+
     if use_ddp:
         dist.destroy_process_group()
 

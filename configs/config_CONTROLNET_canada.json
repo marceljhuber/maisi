@@ -1,12 +1,12 @@
 {
     "main": {
         "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/train",
-        "jobname": "boston",
+        "jobname": "canada",
         "run_dir": "./runs"
 
     },
     "environment": {
-        "exp_name": "boston",
+        "exp_name": "canada",
         "model_dir": "./models",
         "output_dir": "./outputs",
         "latent_dir": "./outputs/latents_lima",
@@ -27,8 +27,8 @@
             "fold": 0,
             "lr": 1e-5,
             "n_epochs": 500,
-            "weighted_loss_label": [129],
-            "weighted_loss": 100
+            "weighted_loss_label": [null],
+            "weighted_loss": 1
         },
         "controlnet_infer": {
            "num_inference_steps": 1000,
