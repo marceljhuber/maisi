@@ -236,11 +236,11 @@ def main():
     # device, run_dir, recon_dir, train_loader, val_loader = setup_training(config)
     print(f"latent_dir:", args.latent_dir)
     train_loader, val_loader = create_latent_dataloaders(args.latent_dir)
-    train_loader = torch.utils.data.DataLoader(
-        list(train_loader.dataset)[: 100 * train_loader.batch_size],
-        batch_size=train_loader.batch_size,
-        shuffle=True,
-    )
+    # train_loader = torch.utils.data.DataLoader(
+    #     list(train_loader.dataset)[: 100 * train_loader.batch_size],
+    #     batch_size=train_loader.batch_size,
+    #     shuffle=True,
+    # )
 
     args.model_dir = os.path.join(
         args.model_dir,
