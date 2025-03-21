@@ -100,7 +100,7 @@ def generate_image_grid(
             condition[0, class_idx] = 1.0  # Set the corresponding class channel to 1
 
             for seed_idx in range(num_seeds):
-                logger.info(f"{class_idx}-{seed_idx}")
+                # logger.info(f"{class_idx}-{seed_idx}")
                 # Set seed for reproducibility
                 torch.manual_seed(fixed_seeds[seed_idx])
                 random.seed(fixed_seeds[seed_idx])
