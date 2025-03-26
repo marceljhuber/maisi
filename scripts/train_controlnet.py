@@ -32,6 +32,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 
+from datetime import datetime
 import wandb
 from networks.autoencoderkl_maisi import AutoencoderKlMaisi
 from scripts.utils_data import create_latent_dataloaders
@@ -102,6 +103,7 @@ def generate_image_grid(
     all_images = []
 
     # Create conditions for each class (one-hot encoded)
+    # with torch.no_grad(), torch.cuda.amp.autocast():
     with torch.no_grad(), torch.amp.autocast("cuda"):
         for class_idx in range(num_classes):
             logger.info(f"Generating images of class {class_idx}.")
@@ -253,7 +255,7 @@ def main():
         }
         wandb.init(
             project="controlnet-training",
-            name=config["environment"].get("exp_name", "controlnet_training"),
+            name=f"{config['main']['jobname']}_{datetime.now().strftime('%Y_%m%d_%H%M')}",
             config=wandb_config,
             resume="allow",
         )

@@ -1,8 +1,13 @@
-#!/usr/bin/env python
-# coding: utf-8
-
 # Copyright (c) MONAI Consortium
-# Licensed under the Apache License, Version 2.0
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#     http://www.apache.org/licenses/LICENSE-2.0
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import copy
 import json
@@ -14,7 +19,6 @@ from pathlib import Path
 import torch
 from monai.config import print_config
 
-import wandb
 from scripts.utils_data import (
     set_random_seeds,
 )
@@ -65,14 +69,6 @@ if isinstance(train_config_out["controlnet_train"]["batch_size"], str):
             print(
                 f"WARNING: Could not convert controlnet_train.batch_size to integer, setting to 1"
             )
-
-# Initialize wandb
-wandb.init(
-    # project="test",
-    project="controlnet-training",
-    config=config,
-    name=f"{config['main']['jobname']}_{datetime.now().strftime('%Y_%m%d_%H%M')}",
-)
 
 # Setup
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
