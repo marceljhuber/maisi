@@ -33,14 +33,18 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 
 import wandb
+from networks.autoencoderkl_maisi import AutoencoderKlMaisi
 from scripts.utils_data import create_latent_dataloaders
 from .utils import (
     define_instance,
     setup_ddp,
 )
 
+from scripts.sample import ReconModel, initialize_noise_latents
+
 
 def generate_image_grid(
+    autoencoder,
     unet,
     controlnet,
     noise_scheduler,
@@ -56,6 +60,7 @@ def generate_image_grid(
     Generate a grid of images for visualization after each epoch.
 
     Args:
+        autoencoder: The trained autoencoder model
         unet: The trained diffusion UNet model
         controlnet: The ControlNet model being trained
         noise_scheduler: Noise scheduler for the diffusion process
@@ -66,8 +71,22 @@ def generate_image_grid(
         num_seeds: Number of different seeds to use (columns)
         num_classes: Number of different classes to visualize (rows)
     """
+    # PNG image intensity range
+    a_min = 0
+    a_max = 255
+    # autoencoder output intensity range
+    b_min = -1.0
+    b_max = 1.0
+
+    noise_factor = 1.0
+
+    autoencoder.eval()
     controlnet.eval()
     unet.eval()
+
+    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
+        device
+    )
 
     # Create a directory for visualizations if it doesn't exist
     os.makedirs(save_dir, exist_ok=True)
@@ -83,14 +102,14 @@ def generate_image_grid(
     all_images = []
 
     # Create conditions for each class (one-hot encoded)
-    with torch.no_grad():
+    with torch.no_grad(), torch.amp.autocast("cuda"):
         for class_idx in range(num_classes):
             logger.info(f"Generating images of class {class_idx}.")
             class_images = []
 
             # Create condition for this class
             condition = torch.zeros(
-                (1, num_classes, 256, 256), dtype=torch.float32, device=device
+                (1, num_classes, 1, 1), dtype=torch.float32, device=device
             )
             condition[0, class_idx] = 1.0  # Set the corresponding class channel to 1
 
@@ -100,8 +119,11 @@ def generate_image_grid(
                 random.seed(fixed_seeds[seed_idx])
                 np.random.seed(fixed_seeds[seed_idx])
 
-                # Start from random noise
-                latent = torch.randn((1, 4, 64, 64), device=device) * scale_factor
+                # Generate random noise
+                latents = initialize_noise_latents((4, 64, 64), device) * noise_factor
+
+                # Explicitly convert to float32 before any processing
+                latents = latents.float()
 
                 # Denoise step by step
                 for i, t in enumerate(noise_scheduler.timesteps):
@@ -110,38 +132,61 @@ def generate_image_grid(
 
                     # Get controlnet output
                     down_block_res_samples, mid_block_res_sample = controlnet(
-                        x=latent, timesteps=timesteps, controlnet_cond=condition
+                        x=latents.to(torch.float32),
+                        timesteps=timesteps,
+                        controlnet_cond=condition.to(torch.float32),
                     )
 
                     # Get noise prediction from diffusion unet
                     noise_pred = unet(
-                        x=latent,
+                        x=latents.to(torch.float32),
                         timesteps=timesteps,
-                        down_block_additional_residuals=down_block_res_samples,
-                        mid_block_additional_residual=mid_block_res_sample,
+                        down_block_additional_residuals=[
+                            res.to(torch.float32) for res in down_block_res_samples
+                        ],
+                        mid_block_additional_residual=mid_block_res_sample.to(
+                            torch.float32
+                        ),
                     )
 
                     # Update latent
-                    pred_prev_sample, _ = noise_scheduler.step(noise_pred, t, latent)
-                    latent = pred_prev_sample
+                    latents, _ = noise_scheduler.step(noise_pred, t, latents)
 
                     # Clear CUDA cache every few steps to prevent memory buildup
                     if i % 10 == 0:
                         torch.cuda.empty_cache()
 
-                # Normalize latent to [0, 1] for visualization and average across color channels
-                latent_gray = latent[0].mean(dim=0, keepdim=True)
-                latent_norm = (latent_gray - latent_gray.min()) / (
-                    latent_gray.max() - latent_gray.min()
-                )
-                class_images.append(latent_norm.unsqueeze(0))
+                del noise_pred
+                torch.cuda.empty_cache()
+
+                # Decode latents to images
+                synthetic_images = recon_model(latents)
+
+                # Ensure synthetic_images is float32 for proper clipping and normalization
+                synthetic_images = synthetic_images.to(torch.float32)
+
+                # Clip values to valid range
+                synthetic_images = torch.clip(synthetic_images, b_min, b_max).cpu()
+
+                # Normalize images to [0, 1] range for visualization
+                synthetic_images = (synthetic_images - b_min) / (b_max - b_min)
+
+                class_images.append(synthetic_images)
+                torch.cuda.empty_cache()
 
             # Collect all images for this class
             all_images.extend(class_images)
 
     # Create a grid from all generated images
-    grid = make_grid(torch.cat(all_images, dim=0), nrow=num_seeds, normalize=True)
-    grid_np = grid.cpu().permute(1, 2, 0).numpy()
+    # Ensure all tensors have the same dtype before creating the grid
+    all_images_tensor = torch.cat(all_images, dim=0).float()
+    grid = make_grid(all_images_tensor, nrow=num_seeds, normalize=False)
+
+    del all_images, all_images_tensor
+    torch.cuda.empty_cache()
+
+    # Convert to numpy for matplotlib
+    grid_np = grid.permute(1, 2, 0).numpy()
 
     # Save the grid
     plt.figure(figsize=(20, 10))
@@ -227,13 +272,13 @@ def main():
 
     # Step 1: set data loader
     # device, run_dir, recon_dir, train_loader, val_loader = setup_training(config)
-    print(f"latent_dir:", args.latent_dir)
+    # print(f"latent_dir:", args.latent_dir)
     train_loader, val_loader = create_latent_dataloaders(args.latent_dir)
-    # train_loader = torch.utils.data.DataLoader(
-    #     list(train_loader.dataset)[: 500 * train_loader.batch_size],
-    #     batch_size=train_loader.batch_size,
-    #     shuffle=True,
-    # )
+    train_loader = torch.utils.data.DataLoader(
+        list(train_loader.dataset)[: 100 * train_loader.batch_size],
+        batch_size=train_loader.batch_size,
+        shuffle=True,
+    )
 
     args.model_dir = os.path.join(
         args.model_dir,
@@ -243,10 +288,36 @@ def main():
     vis_dir = os.path.join(args.model_dir, f"visualizations")
     os.makedirs(vis_dir, exist_ok=True)
 
-    # Step 2: define diffusion model and controlnet
-    # define diffusion Model
+    # Step 2: Define Autoencoder, Unet and ControlNet
+    ####################################################################################################################
+    # Autoencoder
+    ####################################################################################################################
+    if args.trained_autoencoder_path is not None:
+        if not os.path.exists(args.trained_autoencoder_path):
+            raise ValueError("Please download the autoencoder checkpoint.")
+
+        model_config = config["model"]["autoencoder"]
+
+        # Load model
+        autoencoder = AutoencoderKlMaisi(**model_config).to(device)
+        checkpoint = torch.load(
+            config["environment"]["trained_autoencoder_path"],
+            map_location=device,
+            weights_only=True,
+        )
+        autoencoder.load_state_dict(checkpoint["autoencoder_state_dict"])
+        autoencoder.eval()
+    else:
+        logger.info("trained autoencoder model is not loaded.")
+
+    # Convert autoencoder parameters to float32
+    for param in autoencoder.parameters():
+        param.data = param.data.to(torch.float32)
+    ####################################################################################################################
+    # Unet
+    ####################################################################################################################
     unet = define_instance(args, "diffusion_unet_def").to(device)
-    # load trained diffusion model
+
     if args.trained_diffusion_path is not None:
         if not os.path.exists(args.trained_diffusion_path):
             raise ValueError("Please download the trained diffusion unet checkpoint.")
@@ -266,12 +337,12 @@ def main():
         logger.info("trained diffusion model is not loaded.")
         scale_factor = 1.0
         logger.info(f"set scale_factor -> {scale_factor}.")
-
-    # define ControlNet
+    ####################################################################################################################
+    # ControlNet
+    ####################################################################################################################
     controlnet = define_instance(args, "controlnet_def").to(device)
-    # copy weights from the DM to the controlnet
     copy_model_state(controlnet, unet.state_dict())
-    # load trained controlnet model if it is provided
+
     if args.trained_controlnet_path is not None:
         if not os.path.exists(args.trained_controlnet_path):
             raise ValueError("Please download the trained ControlNet checkpoint.")
@@ -285,9 +356,11 @@ def main():
         )
     else:
         logger.info("train controlnet model from scratch.")
+
     # we freeze the parameters of the diffusion model.
     for p in unet.parameters():
         p.requires_grad = False
+    ####################################################################################################################
 
     noise_scheduler = define_instance(args, "noise_scheduler")
 
@@ -340,8 +413,8 @@ def main():
 
             labels = labels.unsqueeze(-1).unsqueeze(-1)  # Now shape [40, 4, 1, 1]
             labels = F.interpolate(
-                labels, size=(256, 256), mode="bilinear", align_corners=False
-            )  # Now shape [40, 4, 256, 256, 1]
+                labels, size=(1, 1), mode="bilinear", align_corners=False
+            )  # Now shape [40, 4, 256, 256]
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -351,6 +424,8 @@ def main():
                 noise = torch.randn(noise_shape, dtype=inputs.dtype).to(device)
 
                 controlnet_cond = labels.float()
+                # print(f"noise.shape: ", noise.shape)
+                # print(f"condition.shape: ", controlnet_cond.shape)
 
                 # create timesteps
                 timesteps = torch.randint(
@@ -514,6 +589,7 @@ def main():
                     wandb.save(f"{args.model_dir}/{args.exp_name}_best.pt")
 
             generate_image_grid(
+                autoencoder=autoencoder,
                 unet=unet,
                 controlnet=controlnet.module if world_size > 1 else controlnet,
                 noise_scheduler=noise_scheduler,
