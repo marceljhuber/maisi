@@ -111,7 +111,7 @@ def generate_image_grid(
 
             # Create condition for this class
             condition = torch.zeros(
-                (1, num_classes, 1, 1), dtype=torch.float32, device=device
+                (1, num_classes, 256, 256), dtype=torch.float32, device=device
             )
             condition[0, class_idx] = 1.0  # Set the corresponding class channel to 1
 
@@ -272,15 +272,13 @@ def main():
     for k, v in training_dict.items():
         setattr(args, k, v)
 
-    # Step 1: set data loader
-    # device, run_dir, recon_dir, train_loader, val_loader = setup_training(config)
-    # print(f"latent_dir:", args.latent_dir)
+    # Step 1: Define Data Loader
     train_loader, val_loader = create_latent_dataloaders(args.latent_dir)
-    train_loader = torch.utils.data.DataLoader(
-        list(train_loader.dataset)[: 100 * train_loader.batch_size],
-        batch_size=train_loader.batch_size,
-        shuffle=True,
-    )
+    # train_loader = torch.utils.data.DataLoader(
+    #     list(train_loader.dataset)[: 100 * train_loader.batch_size],
+    #     batch_size=train_loader.batch_size,
+    #     shuffle=True,
+    # )
 
     args.model_dir = os.path.join(
         args.model_dir,
@@ -374,7 +372,7 @@ def main():
             find_unused_parameters=True,
         )
 
-    # Step 3: training config
+    # Step 3: Training config
     weighted_loss = args.controlnet_train["weighted_loss"]
     weighted_loss_label = args.controlnet_train["weighted_loss_label"]
     optimizer = torch.optim.AdamW(
@@ -389,7 +387,7 @@ def main():
         optimizer, total_iters=total_steps, power=2.0
     )
 
-    # Step 4: training
+    # Step 4: Training
     n_epochs = args.controlnet_train["n_epochs"]
     # scaler = GradScaler()
     scaler = GradScaler("cuda")
@@ -415,8 +413,8 @@ def main():
 
             labels = labels.unsqueeze(-1).unsqueeze(-1)  # Now shape [40, 4, 1, 1]
             labels = F.interpolate(
-                labels, size=(1, 1), mode="bilinear", align_corners=False
-            )  # Now shape [40, 4, 256, 256]
+                labels, size=(256, 256), mode="bilinear", align_corners=False
+            )  # Now shape [40, 4, 1, 1]
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -426,10 +424,7 @@ def main():
                 noise = torch.randn(noise_shape, dtype=inputs.dtype).to(device)
 
                 controlnet_cond = labels.float()
-                # print(f"noise.shape: ", noise.shape)
-                # print(f"condition.shape: ", controlnet_cond.shape)
 
-                # create timesteps
                 timesteps = torch.randint(
                     0,
                     noise_scheduler.num_train_timesteps,
@@ -600,7 +595,7 @@ def main():
                 save_dir=vis_dir,
                 logger=logger,
                 scale_factor=scale_factor,
-                num_seeds=1,
+                num_seeds=5,
                 num_classes=4,
             )
 
