@@ -35,7 +35,7 @@ from torchvision.utils import make_grid
 from datetime import datetime
 import wandb
 from networks.autoencoderkl_maisi import AutoencoderKlMaisi
-from scripts.utils_data import create_latent_dataloaders
+from scripts.utils_data import create_latent_dataloaders, create_cluster_dataloaders
 from .utils import (
     define_instance,
     setup_ddp,
@@ -55,7 +55,7 @@ def generate_image_grid(
     logger,
     scale_factor=1.0,
     num_seeds=10,
-    num_classes=4,
+    num_classes=16,
 ):
     """
     Generate a grid of images for visualization after each epoch.
@@ -273,7 +273,10 @@ def main():
         setattr(args, k, v)
 
     # Step 1: Define Data Loader
-    train_loader, val_loader = create_latent_dataloaders(args.latent_dir)
+    # train_loader, val_loader = create_latent_dataloaders(args.latent_dir)
+    train_loader, val_loader = create_cluster_dataloaders(
+        csv_path=args.cluster_labels, batch_size=40, num_workers=8, train_ratio=0.9
+    )
     # train_loader = torch.utils.data.DataLoader(
     #     list(train_loader.dataset)[: 100 * train_loader.batch_size],
     #     batch_size=train_loader.batch_size,
@@ -408,17 +411,26 @@ def main():
         losses = []
         for step, batch in enumerate(train_loader):
             batch_start = time.time()
-            inputs = batch["latent"].squeeze(1).to(device) * scale_factor
-            labels = batch["label"].to(device)
 
-            labels = labels.unsqueeze(-1).unsqueeze(-1)  # Now shape [40, 4, 1, 1]
+            # inputs = batch["latent"].squeeze(1).to(device) * scale_factor  # Latent
+            # labels = batch["label"].to(device)  # Latent
+
+            inputs = batch[0].squeeze(1).to(device) * scale_factor  # Cluster
+            labels = batch[1].to(device)  # Cluster
+
+            labels = torch.nn.functional.one_hot(
+                labels, num_classes=16
+            ).float()  # Now shape [40, num_classes]
+            labels = labels.unsqueeze(-1).unsqueeze(
+                -1
+            )  # Now shape [40, num_classes, 1, 1]
             labels = F.interpolate(
                 labels, size=(256, 256), mode="bilinear", align_corners=False
-            )  # Now shape [40, 4, 1, 1]
+            )  # Now shape [40, num_classes, 256, 256]
 
             optimizer.zero_grad(set_to_none=True)
 
-            # with autocast(, enabled=True):
+            # with autocast(enabled=True):
             with autocast("cuda", enabled=True):
                 noise_shape = list(inputs.shape)
                 noise = torch.randn(noise_shape, dtype=inputs.dtype).to(device)
@@ -595,8 +607,8 @@ def main():
                 save_dir=vis_dir,
                 logger=logger,
                 scale_factor=scale_factor,
-                num_seeds=5,
-                num_classes=4,
+                num_seeds=args.num_seeds,
+                num_classes=args.num_classes,
             )
 
         torch.cuda.empty_cache()

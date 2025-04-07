@@ -28,7 +28,7 @@ print_config()
 ########################################################################################################################
 # Step 1: Training Config Preparation
 ########################################################################################################################
-config_path = "./configs/config_CONTROLNET_england.json"
+config_path = "./configs/config_CONTROLNET_france.json"
 
 with open(config_path, "r") as f:
     config = json.load(f)
@@ -110,7 +110,7 @@ num_gpus = 1
 
 
 ########################################################################################################################
-def run_torchrun(module, module_args, num_gpus=1):
+def run_torchrun(module, module_args, master_port=29500, num_gpus=1):
     num_nodes = 1
     torchrun_command = [
         "torchrun",
@@ -118,6 +118,8 @@ def run_torchrun(module, module_args, num_gpus=1):
         str(num_gpus),
         "--nnodes",
         str(num_nodes),
+        "--master_port",
+        str(master_port),
         "-m",
         module,
     ] + module_args
@@ -157,5 +159,5 @@ def run_torchrun(module, module_args, num_gpus=1):
 module = "scripts.train_controlnet"
 module_args = ["--config", config_path]
 
-run_torchrun(module, module_args, num_gpus=num_gpus)
+run_torchrun(module, module_args, 29501, num_gpus=num_gpus)
 ########################################################################################################################

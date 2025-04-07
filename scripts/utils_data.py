@@ -23,6 +23,7 @@ from torch.optim import lr_scheduler
 from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm import tqdm
+import pandas as pd
 
 
 import os
@@ -76,6 +77,9 @@ class SpeckleNoise:
         return torch.clamp(noisy, -1, 1)
 
 
+########################################################################################################################
+# Dataset Variations
+########################################################################################################################
 class GrayscaleDataset(Dataset):
     """Dataset for grayscale images."""
 
@@ -94,6 +98,7 @@ class GrayscaleDataset(Dataset):
         return {"image": image}
 
 
+########################################################################################################################
 class GrayscaleDatasetLabels(Dataset):
     """Dataset for grayscale images with one-hot encoded labels."""
 
@@ -151,6 +156,7 @@ class GrayscaleDatasetLabels(Dataset):
         return {"image": image, "label": label}
 
 
+########################################################################################################################
 class LatentDataset(Dataset):
     """Dataset for loading latent tensors from .pt files with class labels."""
 
@@ -184,16 +190,49 @@ class LatentDataset(Dataset):
         }
 
 
+########################################################################################################################
+class ClusterDataset(Dataset):
+    """Dataset for loading images with cluster labels."""
+
+    def __init__(self, latent_paths, cluster_labels, transform=None):
+        """
+        Initialize the dataset.
+
+        Args:
+            latent_paths (list): List of image file paths
+            cluster_labels (list): List of cluster labels corresponding to file paths
+            transform (callable, optional): Optional transform to be applied on the images
+        """
+        self.latent_paths = latent_paths
+        self.cluster_labels = cluster_labels
+
+    def __len__(self):
+        return len(self.latent_paths)
+
+    def __getitem__(self, idx):
+        # Load latent
+        latent_path = self.latent_paths[idx]
+        latent = torch.load(latent_path, weights_only=True)
+
+        # Get label
+        label = self.cluster_labels[idx]
+
+        return latent, label
+
+
+########################################################################################################################
+
+
 def list_latent_files(directory_path):
     """Find all .pt files in directory and subdirectories."""
     return glob.glob(os.path.join(directory_path, "**", "*_latent.pt"), recursive=True)
 
 
-def split_latents_by_patient(latent_files, train_ratio=0.8):
+def split_data_by_patient(file_paths, train_ratio=0.8):
     """Split dataset by patient ID to avoid patient leakage between train and validation."""
     # Extract unique patient IDs
     patient_ids = set()
-    for file_path in latent_files:
+    for file_path in file_paths:
         filename = Path(file_path).stem
         try:
             patient_id = filename.split("-")[1]
@@ -213,7 +252,7 @@ def split_latents_by_patient(latent_files, train_ratio=0.8):
     train_files = []
     val_files = []
 
-    for file_path in latent_files:
+    for file_path in file_paths:
         filename = Path(file_path).stem
         try:
             patient_id = filename.split("-")[1]
@@ -227,6 +266,73 @@ def split_latents_by_patient(latent_files, train_ratio=0.8):
     return train_files, val_files
 
 
+def split_data_by_patient(file_paths, cluster_labels=None, train_ratio=0.9):
+    """
+    Split data by patient ID to prevent patient data leakage between train and validation.
+
+    Args:
+        file_paths (list): List of image file paths
+        cluster_labels (list): List of cluster labels
+        train_ratio (float): Ratio of patients to include in training set
+
+    Returns:
+        tuple: (train_files, train_labels, val_files, val_labels)
+    """
+    # Extract patient IDs from filenames
+    # Assuming format like: .../CNV-1016042-101.jpeg where 1016042 is the patient ID
+    patient_ids = []
+    for file_path in file_paths:
+        path = Path(file_path)
+        # Extract patient ID from filename using the pattern shown in the example
+        try:
+            patient_id = path.stem.split("-")[1]
+            patient_ids.append(patient_id)
+        except IndexError:
+            # If the filename format doesn't match, use the filename as ID
+            patient_ids.append(path.stem)
+
+    # Get unique patient IDs
+    unique_patients = list(set(patient_ids))
+
+    # Shuffle and split patients
+    random.shuffle(unique_patients)
+    split_idx = int(len(unique_patients) * train_ratio)
+    train_patients = set(unique_patients[:split_idx])
+    val_patients = set(unique_patients[split_idx:])
+
+    # Split data by patient
+    train_files, train_labels = [], []
+    val_files, val_labels = [], []
+
+    if cluster_labels is not None:
+        for i, (file_path, label) in enumerate(zip(file_paths, cluster_labels)):
+            patient_id = patient_ids[i]
+            if patient_id in train_patients:
+                train_files.append(file_path)
+                train_labels.append(label)
+            else:
+                val_files.append(file_path)
+                val_labels.append(label)
+
+        return train_files, train_labels, val_files, val_labels
+    else:
+        for file_path in file_paths:
+            filename = Path(file_path).stem
+            try:
+                patient_id = filename.split("-")[1]
+                if patient_id in train_patients:
+                    train_files.append(file_path)
+                elif patient_id in val_patients:
+                    val_files.append(file_path)
+            except IndexError:
+                continue  # Skip files that don't follow the naming convention
+
+        return train_files, val_files
+
+
+########################################################################################################################
+# Data Loader Variations
+########################################################################################################################
 def create_latent_dataloaders(
     latent_dir, batch_size=40, num_workers=8, train_ratio=0.9
 ):
@@ -240,7 +346,7 @@ def create_latent_dataloaders(
         raise ValueError(f"No latent files found in {latent_dir}")
 
     # Split by patient ID
-    train_files, val_files = split_latents_by_patient(latent_files, train_ratio)
+    train_files, val_files = split_data_by_patient(latent_files, train_ratio)
 
     print(
         f"Found {len(train_files)} training and {len(val_files)} validation latent files"
@@ -274,6 +380,117 @@ def create_latent_dataloaders(
     )
 
     return train_loader, val_loader
+
+
+########################################################################################################################
+def create_cluster_dataloaders(
+    csv_path, batch_size=40, num_workers=8, train_ratio=0.9, transform=None
+):
+    """
+    Create train and validation dataloaders from a CSV file containing file paths and cluster labels.
+
+    Args:
+        csv_path (str): Path to the CSV file with 'filepath' and 'cluster' columns
+        batch_size (int): Batch size for dataloaders
+        num_workers (int): Number of workers for dataloaders
+        train_ratio (float): Ratio of patients to include in training set
+        transform (callable, optional): Transform to apply to the images
+
+    Returns:
+        tuple: (train_loader, val_loader)
+    """
+    # Set random seeds for reproducibility
+    set_random_seeds()
+
+    # Read CSV file
+    df = pd.read_csv(csv_path)
+
+    # Check if required columns exist
+    if "latent_path" not in df.columns or "cluster" not in df.columns:
+        raise ValueError("CSV must contain 'filepath' and 'cluster' columns")
+
+    # Extract file paths and cluster labels
+    file_paths = df["latent_path"].tolist()
+    cluster_labels = df["cluster"].tolist()
+
+    # Verify that all files exist
+    missing_files = [f for f in file_paths if not os.path.exists(f)]
+    if missing_files:
+        print(
+            f"Warning: {len(missing_files)} files not found. First few: {missing_files[:5]}"
+        )
+        # Filter out missing files
+        valid_indices = [i for i, f in enumerate(file_paths) if os.path.exists(f)]
+        file_paths = [file_paths[i] for i in valid_indices]
+        cluster_labels = [cluster_labels[i] for i in valid_indices]
+
+    # Split data by patient ID
+    train_files, train_labels, val_files, val_labels = split_data_by_patient(
+        file_paths, cluster_labels, train_ratio
+    )
+
+    print(f"Found {len(train_files)} training and {len(val_files)} validation samples")
+
+    # Count unique patients in each split
+    train_patients = set(
+        [
+            Path(f).stem.split("-")[1] if "-" in Path(f).stem else Path(f).stem
+            for f in train_files
+        ]
+    )
+    val_patients = set(
+        [
+            Path(f).stem.split("-")[1] if "-" in Path(f).stem else Path(f).stem
+            for f in val_files
+        ]
+    )
+
+    print(f"Training samples from {len(train_patients)} patients")
+    print(f"Validation samples from {len(val_patients)} patients")
+
+    # Count samples per cluster
+    train_cluster_counts = {}
+    for label in train_labels:
+        train_cluster_counts[label] = train_cluster_counts.get(label, 0) + 1
+
+    val_cluster_counts = {}
+    for label in val_labels:
+        val_cluster_counts[label] = val_cluster_counts.get(label, 0) + 1
+
+    print("Training samples per cluster:")
+    for cluster, count in sorted(train_cluster_counts.items()):
+        print(f"  Cluster {cluster}: {count} samples")
+
+    print("Validation samples per cluster:")
+    for cluster, count in sorted(val_cluster_counts.items()):
+        print(f"  Cluster {cluster}: {count} samples")
+
+    print(f"train_files: ", len(train_files))
+    # Create datasets
+    train_dataset = ClusterDataset(train_files, train_labels, transform)
+    val_dataset = ClusterDataset(val_files, val_labels, transform)
+
+    # Create dataloaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    return train_loader, val_loader
+
+
+########################################################################################################################
 
 
 def setup_transforms():
