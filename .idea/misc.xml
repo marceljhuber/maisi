@@ -3,7 +3,7 @@
   <component name="Black">
     <option name="enabledOnReformat" value="true" />
     <option name="enabledOnSave" value="true" />
-    <option name="sdkName" value="maisi" />
+    <option name="sdkName" value="ai" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="maisi" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="ai" project-jdk-type="Python SDK" />
 </project>
