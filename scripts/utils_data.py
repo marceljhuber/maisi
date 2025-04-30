@@ -491,6 +491,174 @@ def create_cluster_dataloaders(
 
 
 ########################################################################################################################
+def create_oct_dataloaders(
+    data_dir, batch_size=40, num_workers=8, train_ratio=0.9, transform=None
+):
+    """
+    Create train and validation dataloaders from a directory containing
+    precomputed OCT tensors (.pt files) and their reference mask images (.png files).
+
+    Args:
+        data_dir (str): Path to the directory containing OCT tensors and reference images
+        batch_size (int): Batch size for dataloaders
+        num_workers (int): Number of workers for dataloaders
+        train_ratio (float): Ratio of patients to include in training set
+        transform (callable, optional): Transform to apply to the data
+
+    Returns:
+        tuple: (train_loader, val_loader)
+    """
+    # Set random seeds for reproducibility
+    set_random_seeds()
+
+    # Get all OCT tensor paths
+    oct_files = sorted(
+        [f for f in os.listdir(data_dir) if f.endswith("_oct_latent.pt")]
+    )
+    oct_paths = [os.path.join(data_dir, f) for f in oct_files]
+
+    # Get corresponding reference mask paths
+    ref_paths = []
+    valid_oct_paths = []
+
+    for oct_path in oct_paths:
+        ref_path = oct_path.replace("_oct_latent.pt", "_ref.png")
+        if os.path.exists(ref_path):
+            ref_paths.append(ref_path)
+            valid_oct_paths.append(oct_path)
+        else:
+            print(
+                f"Warning: Reference image not found for {os.path.basename(oct_path)}"
+            )
+
+    # Update oct_paths to only include those with matching ref files
+    oct_paths = valid_oct_paths
+
+    if len(oct_paths) == 0:
+        raise ValueError("No valid OCT tensor-image pairs found in the directory")
+
+    print(f"Found {len(oct_paths)} valid OCT tensor-image pairs")
+
+    # Extract device types from filenames
+    device_types = [os.path.basename(f).split("_")[0] for f in oct_paths]
+
+    # Group by patient (assuming the device type and the numbering scheme identify unique patients)
+    # Extract patterns like 'cirrus_00001', 'spectralis_00023', etc.
+    patient_ids = []
+    for path in oct_paths:
+        filename = os.path.basename(path)
+        parts = filename.split("_")
+        if len(parts) >= 2:
+            # Use device type and first few digits as patient ID
+            # This is an approximation - adjust based on your naming convention
+            patient_id = f"{parts[0]}_{parts[1][:3]}"
+            patient_ids.append(patient_id)
+        else:
+            patient_ids.append("unknown")
+
+    # Split data by patient ID
+    unique_patients = list(set(patient_ids))
+    num_train_patients = int(len(unique_patients) * train_ratio)
+
+    # Shuffle patients for random split
+    random.shuffle(unique_patients)
+
+    train_patients = unique_patients[:num_train_patients]
+    val_patients = unique_patients[num_train_patients:]
+
+    # Assign images to train/val based on patient ID
+    train_indices = [i for i, pid in enumerate(patient_ids) if pid in train_patients]
+    val_indices = [i for i, pid in enumerate(patient_ids) if pid in val_patients]
+
+    train_oct_paths = [oct_paths[i] for i in train_indices]
+    train_ref_paths = [ref_paths[i] for i in train_indices]
+    val_oct_paths = [oct_paths[i] for i in val_indices]
+    val_ref_paths = [ref_paths[i] for i in val_indices]
+
+    print(
+        f"Training set: {len(train_oct_paths)} pairs from {len(train_patients)} patients"
+    )
+    print(
+        f"Validation set: {len(val_oct_paths)} pairs from {len(val_patients)} patients"
+    )
+
+    # Count samples per device type
+    train_device_counts = {}
+    for i in train_indices:
+        device = device_types[i]
+        train_device_counts[device] = train_device_counts.get(device, 0) + 1
+
+    val_device_counts = {}
+    for i in val_indices:
+        device = device_types[i]
+        val_device_counts[device] = val_device_counts.get(device, 0) + 1
+
+    print("Training samples per device type:")
+    for device, count in sorted(train_device_counts.items()):
+        print(f"  {device}: {count} samples")
+
+    print("Validation samples per device type:")
+    for device, count in sorted(val_device_counts.items()):
+        print(f"  {device}: {count} samples")
+
+    # Create custom dataset for OCT tensor data
+    class OCTMixedDataset(Dataset):
+        def __init__(self, oct_paths, ref_paths, transform=None):
+            self.oct_paths = oct_paths
+            self.ref_paths = ref_paths
+            self.transform = transform
+
+        def __len__(self):
+            return len(self.oct_paths)
+
+        def __getitem__(self, idx):
+            # Load precomputed OCT tensor
+            oct_tensor = torch.load(self.oct_paths[idx])
+
+            # Load reference mask image as grayscale
+            ref_img = Image.open(self.ref_paths[idx]).convert("L")
+
+            # Convert reference image to tensor and ensure it's normalized between 0 and 1
+            ref_array = np.array(ref_img)
+            ref_tensor = (
+                torch.tensor(ref_array, dtype=torch.float32).unsqueeze(0) / 255.0
+            )
+
+            # Apply transforms if specified
+            if self.transform:
+                # Create a dict with both tensors so they can be transformed together
+                sample = {"image": oct_tensor, "mask": ref_tensor}
+                sample = self.transform(sample)
+                oct_tensor = sample["image"]
+                ref_tensor = sample["mask"]
+
+            return oct_tensor, ref_tensor
+
+    # Create datasets
+    train_dataset = OCTMixedDataset(train_oct_paths, train_ref_paths, transform)
+    val_dataset = OCTMixedDataset(val_oct_paths, val_ref_paths, transform)
+
+    # Create dataloaders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    return train_loader, val_loader
+
+
+########################################################################################################################
 
 
 def setup_transforms():
@@ -585,3 +753,54 @@ def setup_training(config):
     )
 
     return device, run_dir, recon_dir, train_loader, val_loader
+
+
+def split_grayscale_to_channels(
+    grayscale_img, values=[0, 85, 127, 170, 255], tolerance=0
+):
+    """
+    Splits a grayscale image tensor into 5 binary channels, one for each specified value.
+
+    Args:
+        grayscale_img (torch.Tensor): Grayscale image tensor of shape [batch_size, 1, H, W] or [1, H, W] or [H, W]
+        values (list): Pixel values to create channels for. Default: [0, 85, 127, 170, 255]
+        tolerance (int): Tolerance for considering a pixel as belonging to a value. Default: 0
+
+    Returns:
+        torch.Tensor: Binary channels of shape [batch_size, len(values), H, W]
+    """
+    import torch
+
+    # Ensure grayscale_img is a tensor
+    if not isinstance(grayscale_img, torch.Tensor):
+        grayscale_img = torch.tensor(grayscale_img)
+
+    # Handle different input dimensions
+    original_shape = grayscale_img.shape
+    if len(original_shape) == 2:  # [H, W]
+        grayscale_img = grayscale_img.unsqueeze(0).unsqueeze(
+            0
+        )  # Add batch and channel dims
+    elif len(original_shape) == 3:  # [1, H, W] or [B, 1, W]
+        if original_shape[0] == 1:  # [1, H, W]
+            grayscale_img = grayscale_img.unsqueeze(0)  # Add batch dim
+        else:  # [B, H, W]
+            grayscale_img = grayscale_img.unsqueeze(1)  # Add channel dim
+
+    batch_size = grayscale_img.shape[0]
+    height, width = grayscale_img.shape[2], grayscale_img.shape[3]
+
+    # Create output tensor for the 5 channels
+    channels = torch.zeros(
+        (batch_size, len(values), height, width), device=grayscale_img.device
+    )
+
+    # For each value, create a binary mask
+    for i, value in enumerate(values):
+        # Create binary mask where pixels are within tolerance of the target value
+        lower_bound = value - tolerance
+        upper_bound = value + tolerance
+        mask = (grayscale_img >= lower_bound) & (grayscale_img <= upper_bound)
+        channels[:, i : i + 1, :, :] = mask.float()
+
+    return channels

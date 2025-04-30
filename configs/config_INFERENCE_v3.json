@@ -1,0 +1,151 @@
+{
+    "paths": {
+        "data_base_dir": "./data",
+        "embedding_base_dir": "./embeddings",
+        "existing_ckpt_filepath": null,
+        "json_data_list": "./temp_work_dir/datalist.json",
+        "log_dir": "./logs",
+        "model_dir": "./models",
+        "model_filename": "diff_unet_ckpt.pt",
+        "output_dir": "./predictions/ida_0",
+        "output_prefix": "unet_2d",
+        "real_img_median_statistics": "./configs/image_median_statistics.json",
+        "trained_autoencoder_path": "./models/VAE/lima_best.pt",
+        "trained_diffusion_path": "./models/DIFF/ida/runs_50.pt",
+        "trained_controlnet_path": "./models/CONTROLNET/france/france_246.pt"
+    },
+    "inference": {
+        "diffusion_unet_inference": {
+            "bottom_region_index": [0, 0, 1, 0],
+            "dim": [256, 256, 128],
+            "image_output_ext": ".png",
+            "num_output_samples": 108309,
+            "num_inference_steps": 1000,
+            "random_seed": 42,
+            "spacing": [1.0, 1.0, 1.0],
+            "top_region_index": [0, 1, 0, 0]
+        }
+    },
+    "training": {
+        "diffusion_unet_train": {
+            "batch_size": 1,
+            "cache_rate": 0,
+            "lr": 0.0001,
+            "n_epochs": 1000
+        },
+        "save_every": 1
+    },
+    "model_config": {
+        "image_channels": 1,
+        "latent_channels": 4,
+        "spatial_dims": 2,
+        "autoencoder_def": {
+            "_target_": "monai.apps.generation.maisi.networks.autoencoderkl_maisi.AutoencoderKlMaisi",
+            "attention_levels": [false, false, false],
+            "dim_split": 1,
+            "in_channels": "@image_channels",
+            "latent_channels": "@latent_channels",
+            "norm_eps": 1e-06,
+            "norm_float16": true,
+            "norm_num_groups": 32,
+            "num_channels": [64, 128, 256],
+            "num_res_blocks": [2, 2, 2],
+            "num_splits": 1,
+            "out_channels": "@image_channels",
+            "spatial_dims": "@spatial_dims",
+            "use_checkpointing": false,
+            "use_convtranspose": false,
+            "with_decoder_nonlocal_attn": false,
+            "with_encoder_nonlocal_attn": false
+        },
+        "controlnet_def": {
+            "_target_": "monai.apps.generation.maisi.networks.controlnet_maisi.ControlNetMaisi",
+            "spatial_dims": "@spatial_dims",
+            "in_channels": "@latent_channels",
+            "num_channels": [64, 128, 256, 512],
+            "attention_levels": [
+                false,
+                false,
+                true,
+                true
+            ],
+            "num_head_channels": [
+                0, 0, 32, 32
+            ],
+            "num_res_blocks": 2,
+            "use_flash_attention": true,
+            "conditioning_embedding_in_channels": 16,
+            "conditioning_embedding_num_channels": [32, 64, 128]
+        },
+        "diffusion_unet_def": {
+            "_target_": "monai.apps.generation.maisi.networks.diffusion_model_unet_maisi.DiffusionModelUNetMaisi",
+            "spatial_dims": "@spatial_dims",
+            "in_channels": "@latent_channels",
+            "out_channels": "@latent_channels",
+            "num_channels": [64, 128, 256, 512],
+            "attention_levels": [false, false, true, true],
+            "num_head_channels": [0, 0, 32, 32],
+            "num_res_blocks": 2,
+            "use_flash_attention": true,
+            "include_top_region_index_input": false,
+            "include_bottom_region_index_input": false,
+            "include_spacing_input": false
+        },
+        "mask_generation_autoencoder_def": {
+            "_target_": "monai.apps.generation.maisi.networks.autoencoderkl_maisi.AutoencoderKlMaisi",
+            "attention_levels": [false, false, false],
+            "dim_split": 1,
+            "in_channels": 8,
+            "latent_channels": "@latent_channels",
+            "norm_eps": 1e-06,
+            "norm_float16": true,
+            "norm_num_groups": 32,
+            "num_channels": [32, 64, 128],
+            "num_res_blocks": [1, 2, 2],
+            "num_splits": 1,
+            "out_channels": 125,
+            "spatial_dims": "@spatial_dims",
+            "use_checkpointing": false,
+            "use_convtranspose": false,
+            "use_flash_attention": false,
+            "with_decoder_nonlocal_attn": false,
+            "with_encoder_nonlocal_attn": false
+        },
+        "mask_generation_diffusion_def": {
+            "_target_": "monai.networks.nets.diffusion_model_unet.DiffusionModelUNet",
+            "attention_levels": [false, false, true, true],
+            "channels": [64, 128, 256, 512],
+            "cross_attention_dim": 10,
+            "in_channels": "@latent_channels",
+            "num_head_channels": [0, 0, 32, 32],
+            "num_res_blocks": 2,
+            "out_channels": "@latent_channels",
+            "spatial_dims": "@spatial_dims",
+            "upcast_attention": true,
+            "use_flash_attention": true,
+            "with_conditioning": true
+        }
+    },
+    "schedulers": {
+        "mask_generation_noise_scheduler": {
+            "_target_": "monai.networks.schedulers.ddpm.DDPMScheduler",
+            "beta_end": 0.0195,
+            "beta_start": 0.0015,
+            "clip_sample": false,
+            "num_train_timesteps": 1000,
+            "schedule": "scaled_linear_beta"
+        },
+        "noise_scheduler": {
+            "_target_": "monai.networks.schedulers.ddpm.DDPMScheduler",
+            "beta_end": 0.0195,
+            "beta_start": 0.0015,
+            "clip_sample": false,
+            "num_train_timesteps": 1000,
+            "schedule": "scaled_linear_beta"
+        }
+    },
+    "mask_generation": {
+        "latent_shape": [4, 64, 64],
+        "scale_factor": 1.0055984258651733
+    }
+}
