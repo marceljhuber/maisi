@@ -10,6 +10,7 @@ from datetime import timedelta
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from PIL import Image
 import torch.distributed as dist
 import torch.nn.functional as F
 from monai.networks.utils import copy_model_state
@@ -53,6 +54,7 @@ def validate_and_visualize(
     weighted_loss=1.0,
     weighted_loss_label=None,
     rank=0,
+    generate_visuals=True,
 ):
     """
     Validate the model on the validation set, compute loss metrics,
@@ -114,9 +116,17 @@ def validate_and_visualize(
         device
     )
 
+    if generate_visuals:
+        num_batches_to_visualize = len(sample_batches)
+    else:
+        num_batches_to_visualize = 0
+
     logger.info(
-        f"Validating on {len(val_loader)} batches and visualizing {len(sample_batches)} batches"
+        f"Validating on {len(val_loader)} batches and visualizing {num_batches_to_visualize} batches"
     )
+
+    if not generate_visuals:
+        return all_metrics["val_loss"]
 
     with torch.no_grad(), torch.amp.autocast("cuda"):
         # First, compute validation loss on the entire validation set
@@ -268,6 +278,10 @@ def validate_and_visualize(
                 # Clip values to valid range and move to CPU
                 generated_image = torch.clip(generated_image, b_min, b_max).cpu()
 
+                logger.info(
+                    f"Starting denoising for sample {batch_idx * batch_size + sample_idx}"
+                )
+
                 # Normalize to [0, 1] range for visualization
                 generated_image = (generated_image - b_min) / (b_max - b_min)
 
@@ -279,18 +293,63 @@ def validate_and_visualize(
                 gen_img_np = generated_image.squeeze(0).permute(1, 2, 0).numpy()
                 mask_np = original_mask.squeeze(0).squeeze(0).numpy()
 
-                # Create figure with two subplots side by side
-                fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+                # Get the paths for the current sample
+                current_latent_path = val_loader.dataset.oct_paths[
+                    batch_idx * batch_size + sample_idx
+                ]
+                current_ref_path = val_loader.dataset.ref_paths[
+                    batch_idx * batch_size + sample_idx
+                ]
+
+                # Derive the path to the original OCT image from the latent path
+                original_oct_path = current_latent_path.replace(
+                    "_oct_latent.pt", "_oct.png"
+                )
+
+                del latents, noise_pred, down_block_res_samples, mid_block_res_sample
+                torch.cuda.empty_cache()
+
+                logger.info(
+                    f"Completed denoising for sample {batch_idx * batch_size + sample_idx}"
+                )
+
+                # Create figure with three subplots side by side
+                fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+                # Try to load and plot the original OCT image
+                try:
+                    # Load the original OCT image
+                    original_oct_img = Image.open(original_oct_path).convert("L")
+                    original_oct_np = np.array(original_oct_img)
+
+                    # Plot original OCT image
+                    axes[0].imshow(original_oct_np, cmap="gray")
+                    axes[0].set_title("Original OCT Image")
+                    axes[0].axis("off")
+                except Exception as e:
+                    logger.warning(
+                        f"Could not load original OCT image from {original_oct_path}: {e}"
+                    )
+                    axes[0].text(
+                        0.5,
+                        0.5,
+                        "Original OCT\nnot available",
+                        ha="center",
+                        va="center",
+                        transform=axes[0].transAxes,
+                    )
+                    axes[0].set_title("Original OCT Image")
+                    axes[0].axis("off")
 
                 # Plot generated image
-                axes[0].imshow(gen_img_np)
-                axes[0].set_title("Generated Image")
-                axes[0].axis("off")
+                axes[1].imshow(gen_img_np, cmap="gray")
+                axes[1].set_title("Generated Image")
+                axes[1].axis("off")
 
                 # Plot mask
-                axes[1].imshow(mask_np, cmap="viridis")
-                axes[1].set_title("Mask/Condition")
-                axes[1].axis("off")
+                axes[2].imshow(mask_np, cmap="viridis")
+                axes[2].set_title("Mask/Condition")
+                axes[2].axis("off")
 
                 plt.tight_layout()
 
@@ -317,7 +376,7 @@ def validate_and_visualize(
                     )
 
                 # Free up memory
-                del generated_image, latents, noise_pred
+                del generated_image
                 torch.cuda.empty_cache()
 
     # Log metrics to wandb

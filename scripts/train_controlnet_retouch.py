@@ -549,6 +549,11 @@ def main():
         if rank == 0:
             logger.info(f"Running validation for epoch {epoch + 1}...")
 
+            if epoch % args.generate_every == 0:
+                generate_visuals = True
+            else:
+                generate_visuals = False
+
             # Use our new validation function
             val_loss = validate_and_visualize(
                 autoencoder=autoencoder,
@@ -561,10 +566,11 @@ def main():
                 save_dir=val_vis_dir,
                 logger=logger,
                 scale_factor=scale_factor,
-                num_samples=20,  # Visualize 20 validation samples
+                num_samples=5,  # Visualize 20 validation samples
                 weighted_loss=weighted_loss,
                 weighted_loss_label=weighted_loss_label,
                 rank=rank,
+                generate_visuals=generate_visuals,
             )
 
             logger.info(f"Validation loss for epoch {epoch + 1}: {val_loss:.6f}")
@@ -638,21 +644,6 @@ def main():
                 # Log best model to wandb
                 if wandb.run is not None:
                     wandb.save(f"{args.model_dir}/{args.exp_name}_best.pt")
-
-            # Generate image grid for visualization (original function)
-            generate_image_grid(
-                autoencoder=autoencoder,
-                unet=unet,
-                controlnet=controlnet.module if world_size > 1 else controlnet,
-                noise_scheduler=noise_scheduler,
-                device=device,
-                epoch=epoch,
-                save_dir=vis_dir,
-                logger=logger,
-                scale_factor=scale_factor,
-                num_seeds=args.num_seeds,
-                num_classes=args.num_classes,
-            )
 
         torch.cuda.empty_cache()
 
