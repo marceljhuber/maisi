@@ -1,13 +1,13 @@
 {
     "main": {
-        "jobname": "germany2",
+        "jobname": "germany",
         "run_dir": "./runs"
 
     },
     "environment": {
-        "exp_name": "germany2",
+        "exp_name": "germany",
         "data_dir": "/home/user/Thesis/data/RETOUCH_TRAIN_SPECTRALIS",
-        "model_dir": "./models",
+        "model_dir": "./models/CONTROLNET/germany",
         "output_dir": "./outputs",
         "tfevent_path": "./outputs/tfevent",
         "trained_autoencoder_path": "./models/VAE/lima_best.pt",
@@ -17,20 +17,20 @@
     "training": {
         "num_classes": 5,
         "batch_size": 64,
-        "save_every": 2,
-        "generate_every": 1,
+        "save_every": 5,
+        "generate_every": 5,
         "num_workers": 16,
         "controlnet_train": {
             "batch_size": 64,
             "cache_rate": 0.0,
             "fold": 0,
             "lr": 1e-5,
-            "n_epochs": 500,
+            "n_epochs": 5000,
             "weighted_loss_label": [null],
             "weighted_loss": 1
         },
         "controlnet_infer": {
-           "num_inference_steps": 1000,
+           "num_inference_steps": 10,
            "autoencoder_sliding_window_infer_size": [96, 96, 96]
         }
     },

@@ -246,6 +246,8 @@ def train_controlnet(
                             })
 
                         # Print progress
+                        if step == 0:
+                            print(f"\n" + "=="*50)
                         if step % 5 == 0:  # Print more frequently to see progress
                             batches_done = step + 1
                             batches_left = len(train_loader) - batches_done
@@ -260,6 +262,8 @@ def train_controlnet(
                 except Exception as e:
                     logger.error(f"Error processing batch {step} in epoch {epoch+1}: {e}")
                     continue
+
+            print("=="*50)
 
             # Compute epoch metrics
             avg_batch_time = sum(batch_times) / max(len(batch_times), 1)
@@ -280,7 +284,6 @@ def train_controlnet(
                     generate_visuals = (epoch % args['generate_every'] == 0)
 
                     # Run validation
-                    print(f"Running validation for epoch {epoch+1}...")
                     val_start_time = time.time()
 
                     # During epoch loop
@@ -295,7 +298,7 @@ def train_controlnet(
                             epoch=epoch,
                             save_dir=val_vis_dir,
                             scale_factor=scale_factor,
-                            num_samples=5,  # Reduced from 20
+                            num_samples=5,
                             weighted_loss=weighted_loss,
                             weighted_loss_label=weighted_loss_label,
                             rank=rank,
@@ -408,6 +411,8 @@ def train_controlnet(
                 except Exception as e:
                     print(f"Failed to save emergency checkpoint: {e}")
 
+        print("=="*50, f"\n")
+
     # Finish training
     print("Training completed")
 
@@ -501,6 +506,7 @@ def main():
         setattr(args, k, v)
 
     # Create data loaders
+    print("==" * 50)
     print("Creating data loaders")
     train_loader, val_loader = create_oct_dataloaders(
         data_dir=args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers, train_ratio=0.9
@@ -511,6 +517,7 @@ def main():
     os.makedirs(args.model_dir, exist_ok=True)
 
     # Load autoencoder
+    print("==" * 50)
     print("Loading autoencoder model")
     if args.trained_autoencoder_path is not None:
         if not os.path.exists(args.trained_autoencoder_path):
