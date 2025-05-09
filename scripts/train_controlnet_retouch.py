@@ -294,7 +294,6 @@ def train_controlnet(
                             device=device,
                             epoch=epoch,
                             save_dir=val_vis_dir,
-                            logger=logger,
                             scale_factor=scale_factor,
                             num_samples=5,  # Reduced from 20
                             weighted_loss=weighted_loss,
@@ -304,14 +303,14 @@ def train_controlnet(
                         )
                         previous_val_loss = val_loss
                     except Exception as e:
-                        logger.error(f"Validation error: {e}, continuing to next epoch")
+                        print(f"Validation error: {e}, continuing to next epoch")
                         val_loss = previous_val_loss
 
                     val_time = time.time() - val_start_time
                     print(f"Validation completed in {val_time:.2f}s, loss: {val_loss:.6f}")
 
                 except Exception as e:
-                    logger.error(f"Error during validation for epoch {epoch+1}: {e}")
+                    print(f"Error during validation for epoch {epoch+1}: {e}")
                     val_loss = float('inf')
 
                 # Log epoch metrics to wandb
@@ -382,7 +381,7 @@ def train_controlnet(
                     print(f"Checkpoint saving completed in {checkpoint_time:.2f}s")
 
                 except Exception as e:
-                    logger.error(f"Error saving checkpoint for epoch {epoch+1}: {e}")
+                    print(f"Error saving checkpoint for epoch {epoch+1}: {e}")
 
             # Sync processes if using DDP
             if use_ddp:
@@ -392,7 +391,7 @@ def train_controlnet(
             print(f"Completed epoch {epoch+1}/{n_epochs}")
 
         except Exception as e:
-            logger.critical(f"Critical error in epoch {epoch+1}: {e}")
+            print(f"Critical error in epoch {epoch+1}: {e}")
 
             # Try to save emergency checkpoint on rank 0
             if rank == 0:
@@ -407,7 +406,7 @@ def train_controlnet(
                     )
                     print(f"Saved emergency checkpoint to {emergency_path}")
                 except Exception as e:
-                    logger.error(f"Failed to save emergency checkpoint: {e}")
+                    print(f"Failed to save emergency checkpoint: {e}")
 
     # Finish training
     print("Training completed")

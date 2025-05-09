@@ -11,7 +11,7 @@
         "output_dir": "./outputs",
         "tfevent_path": "./outputs/tfevent",
         "trained_autoencoder_path": "./models/VAE/lima_best.pt",
-        "trained_diffusion_path": "./models/DIFF/ida/runs_218.pt",
+        "trained_diffusion_path": "./models/DIFF/ida/runs_50.pt",
         "trained_controlnet_path": null
     },
     "training": {

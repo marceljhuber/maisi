@@ -36,6 +36,8 @@ from .utils import (
     setup_ddp,
 )
 
+from tqdm import tqdm
+
 from scripts.sample import ReconModel, initialize_noise_latents
 
 def validate_and_visualize(
@@ -47,9 +49,8 @@ def validate_and_visualize(
         device,
         epoch,
         save_dir,
-        logger,
         scale_factor=1.0,
-        num_samples=20,
+        num_samples=5,
         weighted_loss=1.0,
         weighted_loss_label=None,
         rank=0,
@@ -68,7 +69,6 @@ def validate_and_visualize(
         device: The device to run inference on
         epoch: Current epoch number
         save_dir: Directory to save the validation visualizations
-        logger: Logger instance
         scale_factor: Scale factor for the latent space
         num_samples: Number of validation samples to visualize
         weighted_loss: Weight factor for loss computation on specific regions
@@ -76,7 +76,6 @@ def validate_and_visualize(
         rank: Process rank for distributed training
         generate_visuals: Whether to generate visualizations
     """
-    logger.info(f"Starting validation for epoch {epoch+1}")
 
     # Set constant ranges for normalization
     IMG_RANGE = {"min": 0, "max": 255}  # PNG image intensity range
@@ -92,7 +91,7 @@ def validate_and_visualize(
 
     # Create directory for validation visualizations if needed
     val_vis_dir = None
-    generate_visuals = False
+
     if generate_visuals:
         val_vis_dir = os.path.join(save_dir, f"epoch_{epoch + 1}_validation")
         os.makedirs(val_vis_dir, exist_ok=True)
@@ -111,7 +110,6 @@ def validate_and_visualize(
         scale_factor=scale_factor,
         weighted_loss=weighted_loss,
         weighted_loss_label=weighted_loss_label,
-        logger=logger
     )
 
     # Generate visualizations if requested
@@ -128,7 +126,6 @@ def validate_and_visualize(
             recon_model=recon_model,
             scale_factor=scale_factor,
             num_samples=num_samples,
-            logger=logger,
             rank=rank
         )
 
@@ -144,7 +141,7 @@ def validate_and_visualize(
 
 def _compute_validation_metrics(
         autoencoder, unet, controlnet, noise_scheduler, val_loader, device,
-        scale_factor, weighted_loss, weighted_loss_label, logger
+        scale_factor, weighted_loss, weighted_loss_label
 ):
     """Memory-efficient validation metrics computation with mixed precision"""
     total_loss = 0.0
@@ -246,7 +243,6 @@ def _generate_validation_visualizations(
         recon_model,
         scale_factor,
         num_samples,
-        logger,
         rank
 ):
     """Generate validation visualizations for a subset of samples"""
@@ -260,13 +256,13 @@ def _generate_validation_visualizations(
         if sample_count >= num_samples:
             break
 
-    logger.info(f"Generating visualizations for {min(sample_count, num_samples)} samples")
+    print(f"Generating visualizations for {min(sample_count, num_samples)} samples")
 
     # Define latent range for normalization
     b_min, b_max = -1.0, 1.0
 
     # Process each batch of samples
-    for batch_idx, batch in enumerate(sample_batches):
+    for batch_idx, batch in tqdm(enumerate(sample_batches)):
         inputs = batch[0].squeeze(1).to(device) * scale_factor  # Latent
         labels = batch[1].to(device)  # Condition/mask
         labels_channels = split_grayscale_to_channels(labels)
@@ -280,7 +276,6 @@ def _generate_validation_visualizations(
                     break
 
                 sample_num = batch_idx * batch_size + sample_idx
-                logger.info(f"Generating visualization for sample {sample_num}/{num_samples}")
 
                 # Extract individual sample
                 sample_label = labels_channels[sample_idx:sample_idx+1].float()
@@ -315,62 +310,51 @@ def _generate_validation_visualizations(
                         output_path=f"{val_vis_dir}/sample_{sample_num}.png",
                         sample_num=sample_num,
                         epoch=epoch,
-                        logger=logger,
                         rank=rank
                     )
 
                 except Exception as e:
-                    logger.error(f"Error generating visualization for sample {sample_num}: {e}", exc_info=True)
+                    print(f"Error generating visualization for sample {sample_num}: {e}")
                     continue
 
 
-def _denoise_sample(unet, controlnet, noise_scheduler, condition, recon_model, device):
-    """Denoise a single sample using segmented diffusion steps to reduce memory usage"""
+def _denoise_sample(unet, controlnet, noise_scheduler, condition, recon_model, device, sample_idx=0, total_samples=5):
+    """Denoise a single sample in a single pass"""
     # Initialize with random noise
     latents = initialize_noise_latents((4, 64, 64), device)
 
-    # Set segment parameters
-    steps_per_segment = 200
-    total_segments = noise_scheduler.timesteps // steps_per_segment
+    # Get all timesteps from the noise scheduler
+    timesteps = noise_scheduler.timesteps
 
-    for segment in range(total_segments):
-        # Set timesteps for this segment
-        start_t = 1000 - (segment * steps_per_segment)
-        end_t = max(1000 - ((segment + 1) * steps_per_segment), 0)
+    # Denoise all steps at once
+    for i, t in tqdm(enumerate(timesteps)):
+        # Get current timestep as tensor
+        current_timestep = torch.tensor([t], device=device)
 
-        # Create timesteps for this segment only
-        segment_steps = torch.linspace(start_t, end_t, steps_per_segment, device=device).long()
+        # Process through ControlNet and UNet
+        down_block_res_samples, mid_block_res_sample = controlnet(
+            x=latents,
+            timesteps=current_timestep,
+            controlnet_cond=condition,
+        )
 
-        # Denoise for this segment
-        for i, t in enumerate(segment_steps):
-            logger.info(f"Step {i}/{len(segment_steps)}, t={t}")
+        noise_pred = unet(
+            x=latents,
+            timesteps=current_timestep,
+            down_block_additional_residuals=down_block_res_samples,
+            mid_block_additional_residual=mid_block_res_sample,
+        )
 
-            # Get timestep
-            timesteps = torch.tensor([t], device=device)
+        # Update latent
+        latents, _ = noise_scheduler.step(noise_pred, t, latents)
 
-            # Process through ControlNet and UNet
-            down_block_res_samples, mid_block_res_sample = controlnet(
-                x=latents,
-                timesteps=timesteps,
-                controlnet_cond=condition,
-            )
+        # Clear intermediate tensors
+        del noise_pred, down_block_res_samples, mid_block_res_sample
 
-            noise_pred = unet(
-                x=latents,
-                timesteps=timesteps,
-                down_block_additional_residuals=down_block_res_samples,
-                mid_block_additional_residual=mid_block_res_sample,
-            )
-
-            # Update latent
-            latents, _ = noise_scheduler.step(noise_pred, t, latents)
-
-            # Clear intermediate tensors
-            del noise_pred, down_block_res_samples, mid_block_res_sample
-
-        # Clear cache after each segment
-        torch.cuda.empty_cache()
-        logger.info(f"Completed denoising segment {segment+1}/{total_segments}")
+        # Periodically clear cache to avoid OOM issues
+        if i % 50 == 0:
+            torch.cuda.empty_cache()
+            # print(f"Completed denoising step {i+1}/{len(timesteps)}")
 
     # Decode latents to images
     with torch.no_grad():
@@ -390,7 +374,6 @@ def _create_and_save_visualization(
         output_path,
         sample_num,
         epoch,
-        logger,
         rank
 ):
     """Create and save a visualization comparing original OCT, generated image, and mask"""
@@ -408,7 +391,7 @@ def _create_and_save_visualization(
         axes[0].imshow(original_oct_np, cmap="gray")
         axes[0].set_title("Original OCT Image")
     except Exception as e:
-        logger.warning(f"Could not load original OCT image from {original_oct_path}: {e}")
+        print(f"Could not load original OCT image from {original_oct_path}: {e}")
         axes[0].text(0.5, 0.5, "Original OCT\nnot available", ha="center", va="center", transform=axes[0].transAxes)
         axes[0].set_title("Original OCT Image")
 
