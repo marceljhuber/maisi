@@ -110,54 +110,21 @@ num_gpus = 1
 
 
 ########################################################################################################################
-def run_torchrun(module, module_args, master_port=29500, num_gpus=1):
-    num_nodes = 1
-    torchrun_command = [
-        "torchrun",
-        "--nproc_per_node",
-        str(num_gpus),
-        "--nnodes",
-        str(num_nodes),
-        "--master_port",
-        str(master_port),
-        "-m",
-        module,
-    ] + module_args
-
-    env = os.environ.copy()
-    env["OMP_NUM_THREADS"] = "1"
-
-    process = subprocess.Popen(
-        torchrun_command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
-    )
-
-    try:
-        while True:
-            output = process.stdout.readline()
-            if output == "" and process.poll() is not None:
-                break
-            if output:
-                print(output.strip())
-    except Exception as e:
-        print(f"An error occurred: {e}")
-    finally:
-        stdout, stderr = process.communicate()
-        print(stdout)
-        if stderr:
-            print(stderr)
-    return
-
-
-########################################################################################################################
 # Step 3: Train the Model
 ########################################################################################################################
-# logger.info("Training the model...")
-module = "scripts.train_controlnet_retouch"
-module_args = ["--config", config_path]
+import importlib
+import sys
 
-run_torchrun(module, module_args, 29501, num_gpus=num_gpus)
-########################################################################################################################
+# Set environment variable to limit OpenMP threads
+os.environ["OMP_NUM_THREADS"] = "1"
+
+# Import the module
+sys.path.append(".")
+train_module = importlib.import_module("scripts.train_controlnet_retouch")
+
+# Set up sys.argv to simulate command line arguments
+sys.argv = ["train_controlnet_retouch.py", "--config", config_path]
+
+# Call the main function
+print("Training the model...")
+train_module.main()

@@ -87,28 +87,6 @@ from .utils import define_instance, setup_ddp
 from scripts.sample import ReconModel, initialize_noise_latents
 
 
-class MemoryTracker:
-    """Utility class to track memory usage"""
-
-    @staticmethod
-    def log_memory_usage(logger, prefix=""):
-        """Log current GPU memory usage"""
-        if torch.cuda.is_available():
-            used_gb = torch.cuda.memory_allocated() / (1024**3)
-            total_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            logger.info(f"{prefix} GPU Memory: {used_gb:.2f}GB / {total_gb:.2f}GB ({used_gb/total_gb*100:.1f}%)")
-
-    @staticmethod
-    def force_memory_cleanup():
-        """Aggressively clean memory"""
-        gc.collect()
-        torch.cuda.empty_cache()
-
-        # Extra aggressive approach on CUDA
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-
-
 def train_controlnet(
         autoencoder: torch.nn.Module,
         unet: torch.nn.Module,
@@ -169,7 +147,7 @@ def train_controlnet(
     os.makedirs(val_vis_dir, exist_ok=True)
 
     if weighted_loss > 1.0:
-        logger.info(f"Applying weighted loss = {weighted_loss} on labels: {weighted_loss_label}")
+        print(f"Applying weighted loss = {weighted_loss} on labels: {weighted_loss_label}")
 
     # Set models to correct states
     controlnet.train()
@@ -177,7 +155,7 @@ def train_controlnet(
     autoencoder.eval()
 
     # Training loop
-    logger.info(f"Starting training for {n_epochs} epochs")
+    print(f"Starting training for {n_epochs} epochs")
     prev_time = time.time()
 
     for epoch in range(n_epochs):
@@ -185,22 +163,10 @@ def train_controlnet(
         batch_times = []
         losses = []
 
-        # Log memory state at start of epoch
-        MemoryTracker.log_memory_usage(logger, f"Epoch {epoch+1} start:")
-
         try:
             # Process each batch
             for step, batch in enumerate(train_loader):
                 batch_start = time.time()
-
-                # Inside batch loop:
-                if step % 5 == 0:
-                    grad_norm = 0.0
-                    for p in controlnet.parameters():
-                        if p.grad is not None:
-                            grad_norm += p.grad.data.norm(2).item() ** 2
-                    grad_norm = grad_norm ** 0.5
-                    logger.info(f"Gradient norm: {grad_norm:.4f}")
 
                 try:
                     # Process batch
@@ -280,25 +246,19 @@ def train_controlnet(
                             })
 
                         # Print progress
-                        if step % 2 == 0:  # Print more frequently to see progress
+                        if step % 5 == 0:  # Print more frequently to see progress
                             batches_done = step + 1
                             batches_left = len(train_loader) - batches_done
                             time_left = timedelta(seconds=batches_left * batch_time)
 
-                            logger.info(
+                            print(
                                 f"[Epoch {epoch+1}/{n_epochs}] [Batch {batches_done}/{len(train_loader)}] "
                                 f"[LR: {lr_scheduler.get_last_lr()[0]:.8f}] [Loss: {loss.item():.4f}] "
                                 f"ETA: {time_left}"
                             )
 
-                    # Clean up memory
-                    del noise_pred, noisy_latent, down_block_res_samples, mid_block_res_sample
-                    if step % 5 == 0:  # Clean more frequently
-                        MemoryTracker.force_memory_cleanup()
-
                 except Exception as e:
                     logger.error(f"Error processing batch {step} in epoch {epoch+1}: {e}")
-                    MemoryTracker.force_memory_cleanup()
                     continue
 
             # Compute epoch metrics
@@ -313,15 +273,14 @@ def train_controlnet(
 
             # Validation and checkpointing on rank 0
             if rank == 0:
-                logger.info(f"Completed epoch {epoch+1} training, starting validation")
-                MemoryTracker.log_memory_usage(logger, "Before validation:")
+                print(f"Completed epoch {epoch+1} training, starting validation")
 
                 try:
                     # Determine whether to generate visuals
                     generate_visuals = (epoch % args['generate_every'] == 0)
 
                     # Run validation
-                    logger.info(f"Running validation for epoch {epoch+1}...")
+                    print(f"Running validation for epoch {epoch+1}...")
                     val_start_time = time.time()
 
                     # During epoch loop
@@ -349,13 +308,11 @@ def train_controlnet(
                         val_loss = previous_val_loss
 
                     val_time = time.time() - val_start_time
-                    logger.info(f"Validation completed in {val_time:.2f}s, loss: {val_loss:.6f}")
+                    print(f"Validation completed in {val_time:.2f}s, loss: {val_loss:.6f}")
 
                 except Exception as e:
                     logger.error(f"Error during validation for epoch {epoch+1}: {e}")
                     val_loss = float('inf')
-
-                MemoryTracker.log_memory_usage(logger, "After validation:")
 
                 # Log epoch metrics to wandb
                 if wandb.run is not None:
@@ -371,7 +328,7 @@ def train_controlnet(
 
                 # Save checkpoint with careful error handling
                 try:
-                    logger.info(f"Saving checkpoint for epoch {epoch+1}")
+                    print(f"Saving checkpoint for epoch {epoch+1}")
                     checkpoint_start = time.time()
 
                     # Get state dict
@@ -394,7 +351,7 @@ def train_controlnet(
                     # Save best validation model if needed
                     if val_loss < best_val_loss:
                         best_val_loss = val_loss
-                        logger.info(f"New best validation loss -> {best_val_loss:.6f}")
+                        print(f"New best validation loss -> {best_val_loss:.6f}")
                         best_val_path = os.path.join(model_dir, f"{exp_name}_best_val.pt")
                         torch.save(
                             {
@@ -409,7 +366,7 @@ def train_controlnet(
                     # Save best training model if needed
                     if epoch_loss < best_train_loss:
                         best_train_loss = epoch_loss
-                        logger.info(f"New best training loss -> {best_train_loss:.6f}")
+                        print(f"New best training loss -> {best_train_loss:.6f}")
                         best_train_path = os.path.join(model_dir, f"{exp_name}_best.pt")
                         torch.save(
                             {
@@ -422,7 +379,7 @@ def train_controlnet(
                         )
 
                     checkpoint_time = time.time() - checkpoint_start
-                    logger.info(f"Checkpoint saving completed in {checkpoint_time:.2f}s")
+                    print(f"Checkpoint saving completed in {checkpoint_time:.2f}s")
 
                 except Exception as e:
                     logger.error(f"Error saving checkpoint for epoch {epoch+1}: {e}")
@@ -432,13 +389,10 @@ def train_controlnet(
                 torch.cuda.synchronize()  # Make sure CUDA operations are done
                 dist.barrier()
 
-            # Final cleanup after epoch
-            MemoryTracker.force_memory_cleanup()
-            logger.info(f"Completed epoch {epoch+1}/{n_epochs}")
+            print(f"Completed epoch {epoch+1}/{n_epochs}")
 
         except Exception as e:
             logger.critical(f"Critical error in epoch {epoch+1}: {e}")
-            MemoryTracker.force_memory_cleanup()
 
             # Try to save emergency checkpoint on rank 0
             if rank == 0:
@@ -451,12 +405,12 @@ def train_controlnet(
                         },
                         emergency_path,
                     )
-                    logger.info(f"Saved emergency checkpoint to {emergency_path}")
+                    print(f"Saved emergency checkpoint to {emergency_path}")
                 except Exception as e:
                     logger.error(f"Failed to save emergency checkpoint: {e}")
 
     # Finish training
-    logger.info("Training completed")
+    print("Training completed")
 
     # Clean up wandb if it was initialized on rank 0
     if rank == 0 and wandb.run is not None:
@@ -517,8 +471,8 @@ def main():
         device = torch.device(f"cuda:{rank}")
 
     torch.cuda.set_device(device)
-    logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
-    logger.info(f"World size: {world_size}")
+    print(f"Number of GPUs: {torch.cuda.device_count()}")
+    print(f"World size: {world_size}")
 
     # Initialize wandb on rank 0
     if rank == 0 and wandb.run is None:
@@ -533,7 +487,7 @@ def main():
             config=wandb_config,
             resume="allow",
         )
-        logger.info("Initialized wandb for tracking")
+        print("Initialized wandb for tracking")
 
     # Extract configuration values
     env_dict = config["environment"]
@@ -548,7 +502,7 @@ def main():
         setattr(args, k, v)
 
     # Create data loaders
-    logger.info("Creating data loaders")
+    print("Creating data loaders")
     train_loader, val_loader = create_oct_dataloaders(
         data_dir=args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers, train_ratio=0.9
     )
@@ -558,7 +512,7 @@ def main():
     os.makedirs(args.model_dir, exist_ok=True)
 
     # Load autoencoder
-    logger.info("Loading autoencoder model")
+    print("Loading autoencoder model")
     if args.trained_autoencoder_path is not None:
         if not os.path.exists(args.trained_autoencoder_path):
             raise ValueError("Autoencoder checkpoint not found.")
@@ -583,7 +537,7 @@ def main():
             param.data = param.data.to(torch.float32)
 
     # Load UNet
-    logger.info("Loading UNet model")
+    print("Loading UNet model")
     unet = define_instance(args, "diffusion_unet_def").to(device)
 
     # Load pretrained diffusion model
@@ -600,13 +554,13 @@ def main():
 
         unet.load_state_dict(diffusion_model_ckpt["unet_state_dict"])
         scale_factor = diffusion_model_ckpt["scale_factor"]
-        logger.info(f"Loaded diffusion model from {args.trained_diffusion_path}")
-        logger.info(f"Loaded scale_factor from diffusion model: {scale_factor}")
+        print(f"Loaded diffusion model from {args.trained_diffusion_path}")
+        print(f"Loaded scale_factor from diffusion model: {scale_factor}")
     else:
         logger.warning("No trained diffusion model provided.")
 
     # Initialize ControlNet
-    logger.info("Initializing ControlNet model")
+    print("Initializing ControlNet model")
     controlnet = define_instance(args, "controlnet_def").to(device)
     copy_model_state(controlnet, unet.state_dict())
 
@@ -618,9 +572,9 @@ def main():
         controlnet.load_state_dict(
             torch.load(args.trained_controlnet_path, map_location=device)["controlnet_state_dict"]
         )
-        logger.info(f"Loaded ControlNet from {args.trained_controlnet_path}")
+        print(f"Loaded ControlNet from {args.trained_controlnet_path}")
     else:
-        logger.info("Training ControlNet from scratch")
+        print("Training ControlNet from scratch")
 
     # Freeze UNet parameters
     for p in unet.parameters():
@@ -653,15 +607,12 @@ def main():
     total_steps = (
                           args.controlnet_train["n_epochs"] * len(train_loader.dataset)
                   ) / args.controlnet_train["batch_size"]
-    logger.info(f"Total number of training steps: {total_steps}")
+    print(f"Total number of training steps: {total_steps}")
 
     # Initialize learning rate scheduler
     lr_scheduler = torch.optim.lr_scheduler.PolynomialLR(
         optimizer, total_iters=total_steps, power=2.0
     )
-
-    # Log memory usage before training
-    MemoryTracker.log_memory_usage(logger, "Initial:")
 
     # Run training loop
     try:

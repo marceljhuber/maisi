@@ -542,44 +542,29 @@ def create_oct_dataloaders(
     # Extract device types from filenames
     device_types = [os.path.basename(f).split("_")[0] for f in oct_paths]
 
-    # Group by patient (assuming the device type and the numbering scheme identify unique patients)
-    # Extract patterns like 'cirrus_00001', 'spectralis_00023', etc.
-    patient_ids = []
-    for path in oct_paths:
-        filename = os.path.basename(path)
-        parts = filename.split("_")
-        if len(parts) >= 2:
-            # Use device type and first few digits as patient ID
-            # This is an approximation - adjust based on your naming convention
-            patient_id = f"{parts[0]}_{parts[1][:3]}"
-            patient_ids.append(patient_id)
-        else:
-            patient_ids.append("unknown")
+    # Simple random split of data
+    num_samples = len(oct_paths)
+    num_train = int(num_samples * train_ratio)
 
-    # Split data by patient ID
-    unique_patients = list(set(patient_ids))
-    num_train_patients = int(len(unique_patients) * train_ratio)
+    # Create a random permutation of indices
+    indices = list(range(num_samples))
+    random.shuffle(indices)
 
-    # Shuffle patients for random split
-    random.shuffle(unique_patients)
+    # Split into train and validation sets
+    train_indices = indices[:num_train]
+    val_indices = indices[num_train:]
 
-    train_patients = unique_patients[:num_train_patients]
-    val_patients = unique_patients[num_train_patients:]
-
-    # Assign images to train/val based on patient ID
-    train_indices = [i for i, pid in enumerate(patient_ids) if pid in train_patients]
-    val_indices = [i for i, pid in enumerate(patient_ids) if pid in val_patients]
-
+    # Get the actual paths
     train_oct_paths = [oct_paths[i] for i in train_indices]
     train_ref_paths = [ref_paths[i] for i in train_indices]
     val_oct_paths = [oct_paths[i] for i in val_indices]
     val_ref_paths = [ref_paths[i] for i in val_indices]
 
     print(
-        f"Training set: {len(train_oct_paths)} pairs from {len(train_patients)} patients"
+        f"Training set: {len(train_oct_paths)} pairs."
     )
     print(
-        f"Validation set: {len(val_oct_paths)} pairs from {len(val_patients)} patients"
+        f"Validation set: {len(val_oct_paths)} pairs."
     )
 
     # Count samples per device type
@@ -613,7 +598,7 @@ def create_oct_dataloaders(
 
         def __getitem__(self, idx):
             # Load precomputed OCT tensor
-            oct_tensor = torch.load(self.oct_paths[idx])
+            oct_tensor = torch.load(self.oct_paths[idx], weights_only=True)
 
             # Load reference mask image as grayscale
             ref_img = Image.open(self.ref_paths[idx]).convert("L")

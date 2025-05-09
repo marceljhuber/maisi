@@ -101,19 +101,18 @@ def validate_and_visualize(
     noise_scheduler.set_timesteps(1000, device=device)
 
     # Collect validation metrics
-    # metrics = _compute_validation_metrics(
-    #     autoencoder=autoencoder,
-    #     unet=unet,
-    #     controlnet=controlnet,
-    #     noise_scheduler=noise_scheduler,
-    #     val_loader=val_loader,
-    #     device=device,
-    #     scale_factor=scale_factor,
-    #     weighted_loss=weighted_loss,
-    #     weighted_loss_label=weighted_loss_label,
-    #     logger=logger
-    # )
-    metrics = 0
+    metrics = _compute_validation_metrics(
+        autoencoder=autoencoder,
+        unet=unet,
+        controlnet=controlnet,
+        noise_scheduler=noise_scheduler,
+        val_loader=val_loader,
+        device=device,
+        scale_factor=scale_factor,
+        weighted_loss=weighted_loss,
+        weighted_loss_label=weighted_loss_label,
+        logger=logger
+    )
 
     # Generate visualizations if requested
     if generate_visuals:
@@ -182,7 +181,7 @@ def _compute_validation_metrics(
                 torch.cuda.empty_cache()
 
                 # Use autocast for forward passes
-                with torch.cuda.amp.autocast():
+                with autocast("cuda", enabled=True):
                     down_block_res_samples, mid_block_res_sample = controlnet(
                         x=noisy_latent,
                         timesteps=timesteps,
@@ -274,7 +273,7 @@ def _generate_validation_visualizations(
         batch_size = inputs.shape[0]
 
         # Process samples in the batch
-        with torch.no_grad(), torch.cuda.amp.autocast():
+        with torch.no_grad(), torch.amp.autocast('cuda'):
             # For each sample in the batch
             for sample_idx in range(batch_size):
                 if batch_idx * batch_size + sample_idx >= num_samples:
