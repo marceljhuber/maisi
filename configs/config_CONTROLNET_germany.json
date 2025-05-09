@@ -6,7 +6,7 @@
     },
     "environment": {
         "exp_name": "germany2",
-        "data_dir": "/home/mhuber/Thesis/data/RETOUCH_TRAIN_SPECTRALIS",
+        "data_dir": "/home/user/Thesis/data/RETOUCH_TRAIN_SPECTRALIS",
         "model_dir": "./models",
         "output_dir": "./outputs",
         "latent_dir": "./outputs/latents_lima",
@@ -22,7 +22,7 @@
         "num_seeds": 10,
         "batch_size": 16,
         "save_every": 2,
-        "generate_every": 5,
+        "generate_every": 1,
         "num_workers": 16,
         "controlnet_train": {
             "batch_size": 16,
@@ -34,7 +34,7 @@
             "weighted_loss": 1
         },
         "controlnet_infer": {
-           "num_inference_steps": 1000,
+           "num_inference_steps": 10,
            "autoencoder_sliding_window_infer_size": [96, 96, 96]
         }
     },

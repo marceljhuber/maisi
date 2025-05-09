@@ -38,23 +38,22 @@ from .utils import (
 
 from scripts.sample import ReconModel, initialize_noise_latents
 
-
 def validate_and_visualize(
-    autoencoder,
-    unet,
-    controlnet,
-    noise_scheduler,
-    val_loader,
-    device,
-    epoch,
-    save_dir,
-    logger,
-    scale_factor=1.0,
-    num_samples=20,
-    weighted_loss=1.0,
-    weighted_loss_label=None,
-    rank=0,
-    generate_visuals=True,
+        autoencoder,
+        unet,
+        controlnet,
+        noise_scheduler,
+        val_loader,
+        device,
+        epoch,
+        save_dir,
+        logger,
+        scale_factor=1.0,
+        num_samples=20,
+        weighted_loss=1.0,
+        weighted_loss_label=None,
+        rank=0,
+        generate_visuals=True,
 ):
     """
     Validate the model on the validation set, compute loss metrics,
@@ -74,340 +73,396 @@ def validate_and_visualize(
         num_samples: Number of validation samples to visualize
         weighted_loss: Weight factor for loss computation on specific regions
         weighted_loss_label: Labels for regions with weighted loss
+        rank: Process rank for distributed training
+        generate_visuals: Whether to generate visualizations
     """
-    # PNG image intensity range
-    a_min = 0
-    a_max = 255
-    # autoencoder output intensity range
-    b_min = -1.0
-    b_max = 1.0
+    logger.info(f"Starting validation for epoch {epoch+1}")
 
+    # Set constant ranges for normalization
+    IMG_RANGE = {"min": 0, "max": 255}  # PNG image intensity range
+    LATENT_RANGE = {"min": -1.0, "max": 1.0}  # autoencoder output range
+
+    # Set models to evaluation mode
     autoencoder.eval()
     controlnet.eval()
     unet.eval()
 
-    # Create directory for validation visualizations
-    val_vis_dir = os.path.join(save_dir, f"epoch_{epoch + 1}_validation")
-    os.makedirs(val_vis_dir, exist_ok=True)
+    # Create reconstruction model
+    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(device)
+
+    # Create directory for validation visualizations if needed
+    val_vis_dir = None
+    generate_visuals = False
+    if generate_visuals:
+        val_vis_dir = os.path.join(save_dir, f"epoch_{epoch + 1}_validation")
+        os.makedirs(val_vis_dir, exist_ok=True)
 
     # Set up inference timesteps
     noise_scheduler.set_timesteps(1000, device=device)
 
-    # Initialize loss tracking variables
+    # Collect validation metrics
+    # metrics = _compute_validation_metrics(
+    #     autoencoder=autoencoder,
+    #     unet=unet,
+    #     controlnet=controlnet,
+    #     noise_scheduler=noise_scheduler,
+    #     val_loader=val_loader,
+    #     device=device,
+    #     scale_factor=scale_factor,
+    #     weighted_loss=weighted_loss,
+    #     weighted_loss_label=weighted_loss_label,
+    #     logger=logger
+    # )
+    metrics = 0
+
+    # Generate visualizations if requested
+    if generate_visuals:
+        _generate_validation_visualizations(
+            autoencoder=autoencoder,
+            unet=unet,
+            controlnet=controlnet,
+            noise_scheduler=noise_scheduler,
+            val_loader=val_loader,
+            device=device,
+            epoch=epoch,
+            val_vis_dir=val_vis_dir,
+            recon_model=recon_model,
+            scale_factor=scale_factor,
+            num_samples=num_samples,
+            logger=logger,
+            rank=rank
+        )
+
+    # Log metrics to wandb
+    if rank == 0 and wandb.run is not None:
+        _log_validation_to_wandb(metrics, val_vis_dir, epoch, num_samples)
+
+    # Return models to training mode
+    controlnet.train()
+
+    return metrics["val_loss"]
+
+
+def _compute_validation_metrics(
+        autoencoder, unet, controlnet, noise_scheduler, val_loader, device,
+        scale_factor, weighted_loss, weighted_loss_label, logger
+):
+    """Memory-efficient validation metrics computation with mixed precision"""
     total_loss = 0.0
     total_samples = 0
-    all_metrics = {
-        "val_loss": 0.0,
-        "val_weighted_loss": 0.0 if weighted_loss > 1.0 else None,
-        "val_mse": 0.0,
-        "val_psnr": 0.0,
-    }
+    max_val_batches = min(len(val_loader), 5)
 
-    # Get the first num_samples batches for visualization
+    with torch.no_grad():
+        for batch_idx, batch in enumerate(val_loader):
+            if batch_idx >= max_val_batches:
+                break
+
+            # Get full batch data
+            inputs = batch[0].squeeze(1).to(device) * scale_factor
+            labels = batch[1].to(device)
+            sub_batch_size = 1  # Process 1 sample at a time for max memory efficiency
+
+            # Process in sub-batches
+            for start_idx in range(0, inputs.shape[0], sub_batch_size):
+                end_idx = min(start_idx + sub_batch_size, inputs.shape[0])
+
+                sub_inputs = inputs[start_idx:end_idx].to(torch.float32)
+                sub_labels = labels[start_idx:end_idx]
+                sub_labels_channels = split_grayscale_to_channels(sub_labels)
+
+                # Random timesteps
+                timesteps = torch.randint(0, noise_scheduler.num_train_timesteps,
+                                          (sub_inputs.shape[0],), device=device).long()
+
+                # Add noise
+                noise = torch.randn_like(sub_inputs, dtype=torch.float32)
+                noisy_latent = noise_scheduler.add_noise(sub_inputs, noise, timesteps)
+
+                # Clear cache
+                torch.cuda.empty_cache()
+
+                # Use autocast for forward passes
+                with torch.cuda.amp.autocast():
+                    down_block_res_samples, mid_block_res_sample = controlnet(
+                        x=noisy_latent,
+                        timesteps=timesteps,
+                        controlnet_cond=sub_labels_channels.float()
+                    )
+
+                    noise_pred = unet(
+                        x=noisy_latent,
+                        timesteps=timesteps,
+                        down_block_additional_residuals=down_block_res_samples,
+                        mid_block_additional_residual=mid_block_res_sample,
+                    )
+
+                # Compute loss with explicit casting to float
+                batch_loss = F.l1_loss(noise_pred.float(), noise.float())
+
+                total_loss += batch_loss.item() * sub_inputs.shape[0]
+                total_samples += sub_inputs.shape[0]
+
+                # Free memory
+                del noise_pred, noisy_latent, down_block_res_samples, mid_block_res_sample
+                torch.cuda.empty_cache()
+
+    return {"val_loss": total_loss / max(total_samples, 1)}
+
+
+def _create_weighted_loss_mask(inputs, labels, weighted_loss, weighted_loss_label):
+    """Create a weighted loss mask for region-specific loss weighting"""
+    weights = torch.ones_like(inputs)
+    roi_mask = torch.zeros_like(inputs[:, :1], dtype=torch.float32)
+
+    # Interpolate labels to match latent dimensions
+    interpolate_label = F.interpolate(
+        labels, size=inputs.shape[2:], mode="nearest"
+    )
+
+    # For each target label, add to the mask
+    for label in weighted_loss_label:
+        for channel in range(interpolate_label.shape[1]):
+            # Create mask for this channel/label combination
+            channel_mask = (interpolate_label[:, channel:channel+1] == label).float()
+            roi_mask = roi_mask + channel_mask
+
+    # Convert to binary mask and apply to weights
+    roi_mask = (roi_mask > 0).float()
+    weights = weights.masked_fill(
+        roi_mask.repeat(1, inputs.shape[1], 1, 1) > 0, weighted_loss
+    )
+
+    return weights
+
+
+def _generate_validation_visualizations(
+        autoencoder,
+        unet,
+        controlnet,
+        noise_scheduler,
+        val_loader,
+        device,
+        epoch,
+        val_vis_dir,
+        recon_model,
+        scale_factor,
+        num_samples,
+        logger,
+        rank
+):
+    """Generate validation visualizations for a subset of samples"""
+    # Collect samples for visualization
     sample_batches = []
     sample_count = 0
-    for batch_idx, batch in enumerate(val_loader):
+
+    for batch in val_loader:
         sample_batches.append(batch)
         sample_count += batch[0].shape[0]
         if sample_count >= num_samples:
             break
 
-    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
-        device
-    )
+    logger.info(f"Generating visualizations for {min(sample_count, num_samples)} samples")
 
-    if generate_visuals:
-        num_batches_to_visualize = len(sample_batches)
-    else:
-        num_batches_to_visualize = 0
+    # Define latent range for normalization
+    b_min, b_max = -1.0, 1.0
 
-    logger.info(
-        f"Validating on {len(val_loader)} batches and visualizing {num_batches_to_visualize} batches"
-    )
+    # Process each batch of samples
+    for batch_idx, batch in enumerate(sample_batches):
+        inputs = batch[0].squeeze(1).to(device) * scale_factor  # Latent
+        labels = batch[1].to(device)  # Condition/mask
+        labels_channels = split_grayscale_to_channels(labels)
+        batch_size = inputs.shape[0]
 
-    if not generate_visuals:
-        return all_metrics["val_loss"]
-
-    with torch.no_grad(), torch.amp.autocast("cuda"):
-        # First, compute validation loss on the entire validation set
-        for batch_idx, batch in enumerate(val_loader):
-            inputs = batch[0].squeeze(1).to(device) * scale_factor  # Latent
-            labels = batch[1].to(device)  # Condition/mask
-            labels = split_grayscale_to_channels(labels)
-
-            # Random timesteps for diffusion process
-            timesteps = torch.randint(
-                0,
-                noise_scheduler.num_train_timesteps,
-                (inputs.shape[0],),
-                device=device,
-            ).long()
-
-            # Create noise
-            noise = torch.randn_like(inputs)
-
-            # Create noisy latent
-            noisy_latent = noise_scheduler.add_noise(
-                original_samples=inputs, noise=noise, timesteps=timesteps
-            )
-
-            # Get controlnet output
-            down_block_res_samples, mid_block_res_sample = controlnet(
-                x=noisy_latent, timesteps=timesteps, controlnet_cond=labels.float()
-            )
-
-            # Get noise prediction from diffusion unet
-            noise_pred = unet(
-                x=noisy_latent,
-                timesteps=timesteps,
-                down_block_additional_residuals=down_block_res_samples,
-                mid_block_additional_residual=mid_block_res_sample,
-            )
-
-            # Compute L1 loss between predicted and actual noise
-            batch_loss = F.l1_loss(noise_pred.float(), noise.float(), reduction="none")
-
-            # Apply weighted loss if specified
-            if weighted_loss > 1.0 and weighted_loss_label:
-                weights = torch.ones_like(inputs).to(inputs.device)
-                roi_mask = torch.zeros_like(inputs[:, :1], dtype=torch.float32)
-
-                interpolate_label = F.interpolate(
-                    labels, size=inputs.shape[2:], mode="nearest"
-                )
-
-                # For each target label, add to the mask
-                for label in weighted_loss_label:
-                    for channel in range(interpolate_label.shape[1]):
-                        # Create mask for this channel/label combination
-                        channel_mask = (
-                            interpolate_label[:, channel : channel + 1] == label
-                        ).float()
-                        # Add masks
-                        roi_mask = roi_mask + channel_mask
-
-                # Convert to binary mask
-                roi_mask = (roi_mask > 0).float()
-
-                # Apply the mask to weights
-                weights = weights.masked_fill(
-                    roi_mask.repeat(1, inputs.shape[1], 1, 1) > 0, weighted_loss
-                )
-
-                weighted_batch_loss = (batch_loss * weights).mean()
-                all_metrics["val_weighted_loss"] += (
-                    weighted_batch_loss.item() * inputs.shape[0]
-                )
-
-            # Calculate final loss
-            batch_loss = batch_loss.mean()
-            total_loss += batch_loss.item() * inputs.shape[0]
-            total_samples += inputs.shape[0]
-
-            # Free up memory
-            del noise_pred, noisy_latent, batch_loss
-            torch.cuda.empty_cache()
-
-        # Calculate average loss
-        all_metrics["val_loss"] = total_loss / total_samples
-        if weighted_loss > 1.0 and weighted_loss_label:
-            all_metrics["val_weighted_loss"] = (
-                all_metrics["val_weighted_loss"] / total_samples
-            )
-
-        logger.info(f"Validation Loss: {all_metrics['val_loss']:.6f}")
-
-        # Now, generate visualizations for the sample batches
-        for batch_idx, batch in enumerate(sample_batches):
-            inputs = batch[0].squeeze(1).to(device) * scale_factor  # Latent
-            labels = batch[1].to(device)  # Condition/mask
-            labels_channels = split_grayscale_to_channels(labels)
-
-            batch_size = inputs.shape[0]
-
+        # Process samples in the batch
+        with torch.no_grad(), torch.cuda.amp.autocast():
             # For each sample in the batch
             for sample_idx in range(batch_size):
                 if batch_idx * batch_size + sample_idx >= num_samples:
                     break
 
-                # Get single sample
-                sample_input = inputs[sample_idx : sample_idx + 1]
-                sample_label = labels_channels[sample_idx : sample_idx + 1].float()
-
-                # Generate denoised image
-                # First, initialize with random noise
-                latents = initialize_noise_latents((4, 64, 64), device)
-
-                # Denoise step by step
-                for i, t in enumerate(noise_scheduler.timesteps):
-                    # Get timestep
-                    timesteps = torch.tensor([t], device=device)
-
-                    # Get controlnet output
-                    down_block_res_samples, mid_block_res_sample = controlnet(
-                        x=latents.to(torch.float32),
-                        timesteps=timesteps,
-                        controlnet_cond=sample_label.to(torch.float32),
-                    )
-
-                    # Get noise prediction from diffusion unet
-                    noise_pred = unet(
-                        x=latents.to(torch.float32),
-                        timesteps=timesteps,
-                        down_block_additional_residuals=[
-                            res.to(torch.float32) for res in down_block_res_samples
-                        ],
-                        mid_block_additional_residual=mid_block_res_sample.to(
-                            torch.float32
-                        ),
-                    )
-
-                    # Update latent
-                    latents, _ = noise_scheduler.step(noise_pred, t, latents)
-
-                    # Clear CUDA cache every few steps
-                    if i % 100 == 0:
-                        torch.cuda.empty_cache()
-
-                # Decode latents to images
-                generated_image = recon_model(latents)
-
-                # Ensure generated_image is float32 for proper manipulation
-                generated_image = generated_image.to(torch.float32)
-
-                # Clip values to valid range and move to CPU
-                generated_image = torch.clip(generated_image, b_min, b_max).cpu()
-
-                logger.info(
-                    f"Starting denoising for sample {batch_idx * batch_size + sample_idx}"
-                )
-
-                # Normalize to [0, 1] range for visualization
-                generated_image = (generated_image - b_min) / (b_max - b_min)
-
-                # Convert original mask to visualization format
-                original_mask = labels[sample_idx : sample_idx + 1].cpu()
-
-                # Create side-by-side visualization
-                # Convert tensors to numpy for matplotlib
-                gen_img_np = generated_image.squeeze(0).permute(1, 2, 0).numpy()
-                mask_np = original_mask.squeeze(0).squeeze(0).numpy()
-
-                # Get the paths for the current sample
-                current_latent_path = val_loader.dataset.oct_paths[
-                    batch_idx * batch_size + sample_idx
-                ]
-                current_ref_path = val_loader.dataset.ref_paths[
-                    batch_idx * batch_size + sample_idx
-                ]
-
-                # Derive the path to the original OCT image from the latent path
-                original_oct_path = current_latent_path.replace(
-                    "_oct_latent.pt", "_oct.png"
-                )
-
-                del latents, noise_pred, down_block_res_samples, mid_block_res_sample
-                torch.cuda.empty_cache()
-
-                logger.info(
-                    f"Completed denoising for sample {batch_idx * batch_size + sample_idx}"
-                )
-
-                # Create figure with three subplots side by side
-                fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-
-                # Try to load and plot the original OCT image
-                try:
-                    # Load the original OCT image
-                    original_oct_img = Image.open(original_oct_path).convert("L")
-                    original_oct_np = np.array(original_oct_img)
-
-                    # Plot original OCT image
-                    axes[0].imshow(original_oct_np, cmap="gray")
-                    axes[0].set_title("Original OCT Image")
-                    axes[0].axis("off")
-                except Exception as e:
-                    logger.warning(
-                        f"Could not load original OCT image from {original_oct_path}: {e}"
-                    )
-                    axes[0].text(
-                        0.5,
-                        0.5,
-                        "Original OCT\nnot available",
-                        ha="center",
-                        va="center",
-                        transform=axes[0].transAxes,
-                    )
-                    axes[0].set_title("Original OCT Image")
-                    axes[0].axis("off")
-
-                # Plot generated image
-                axes[1].imshow(gen_img_np, cmap="gray")
-                axes[1].set_title("Generated Image")
-                axes[1].axis("off")
-
-                # Plot mask
-                axes[2].imshow(mask_np, cmap="viridis")
-                axes[2].set_title("Mask/Condition")
-                axes[2].axis("off")
-
-                plt.tight_layout()
-
-                # Save the visualization
                 sample_num = batch_idx * batch_size + sample_idx
-                plt.savefig(
-                    f"{val_vis_dir}/sample_{sample_num}.png",
-                    dpi=150,
-                    bbox_inches="tight",
-                )
-                plt.close()
+                logger.info(f"Generating visualization for sample {sample_num}/{num_samples}")
 
-                # Log to wandb
-                if (
-                    rank == 0 and wandb.run is not None and sample_num < 5
-                ):  # Only log first 5 to avoid cluttering wandb
-                    wandb.log(
-                        {
-                            f"validation/sample_{sample_num}": wandb.Image(
-                                f"{val_vis_dir}/sample_{sample_num}.png",
-                                caption=f"Epoch {epoch+1} - Sample {sample_num}",
-                            )
-                        }
+                # Extract individual sample
+                sample_label = labels_channels[sample_idx:sample_idx+1].float()
+
+                try:
+                    # Generate denoised image
+                    generated_image = _denoise_sample(
+                        unet=unet,
+                        controlnet=controlnet,
+                        noise_scheduler=noise_scheduler,
+                        condition=sample_label,
+                        recon_model=recon_model,
+                        device=device
                     )
 
-                # Free up memory
-                del generated_image
-                torch.cuda.empty_cache()
+                    # Normalize generated image
+                    generated_image = torch.clip(generated_image, b_min, b_max).cpu()
+                    generated_image = (generated_image - b_min) / (b_max - b_min)
 
-    # Log metrics to wandb
-    if rank == 0 and wandb.run is not None:
-        log_dict = {
-            "validation/loss": all_metrics["val_loss"],
-            "validation/epoch": epoch + 1,
-        }
+                    # Get original mask
+                    original_mask = labels[sample_idx:sample_idx+1].cpu()
 
-        if all_metrics["val_weighted_loss"] is not None:
-            log_dict["validation/weighted_loss"] = all_metrics["val_weighted_loss"]
+                    # Get source paths
+                    current_latent_path = val_loader.dataset.oct_paths[sample_num]
+                    original_oct_path = current_latent_path.replace("_oct_latent.pt", "_oct.png")
 
-        wandb.log(log_dict)
+                    # Create visualization
+                    _create_and_save_visualization(
+                        generated_image=generated_image,
+                        original_mask=original_mask,
+                        original_oct_path=original_oct_path,
+                        output_path=f"{val_vis_dir}/sample_{sample_num}.png",
+                        sample_num=sample_num,
+                        epoch=epoch,
+                        logger=logger,
+                        rank=rank
+                    )
 
-        # Also log a grid of the first few validation samples
-        if os.path.exists(val_vis_dir) and len(os.listdir(val_vis_dir)) > 0:
-            sample_images = [
-                f"{val_vis_dir}/sample_{i}.png" for i in range(min(5, num_samples))
-            ]
-            sample_images = [img for img in sample_images if os.path.exists(img)]
+                except Exception as e:
+                    logger.error(f"Error generating visualization for sample {sample_num}: {e}", exc_info=True)
+                    continue
 
-            if sample_images:
-                wandb.log(
-                    {
-                        "validation/sample_grid": [
-                            wandb.Image(img) for img in sample_images
-                        ]
-                    }
-                )
 
-    # Return model to training mode
-    controlnet.train()
+def _denoise_sample(unet, controlnet, noise_scheduler, condition, recon_model, device):
+    """Denoise a single sample using segmented diffusion steps to reduce memory usage"""
+    # Initialize with random noise
+    latents = initialize_noise_latents((4, 64, 64), device)
 
-    return all_metrics["val_loss"]
+    # Set segment parameters
+    steps_per_segment = 200
+    total_segments = noise_scheduler.timesteps // steps_per_segment
+
+    for segment in range(total_segments):
+        # Set timesteps for this segment
+        start_t = 1000 - (segment * steps_per_segment)
+        end_t = max(1000 - ((segment + 1) * steps_per_segment), 0)
+
+        # Create timesteps for this segment only
+        segment_steps = torch.linspace(start_t, end_t, steps_per_segment, device=device).long()
+
+        # Denoise for this segment
+        for i, t in enumerate(segment_steps):
+            logger.info(f"Step {i}/{len(segment_steps)}, t={t}")
+
+            # Get timestep
+            timesteps = torch.tensor([t], device=device)
+
+            # Process through ControlNet and UNet
+            down_block_res_samples, mid_block_res_sample = controlnet(
+                x=latents,
+                timesteps=timesteps,
+                controlnet_cond=condition,
+            )
+
+            noise_pred = unet(
+                x=latents,
+                timesteps=timesteps,
+                down_block_additional_residuals=down_block_res_samples,
+                mid_block_additional_residual=mid_block_res_sample,
+            )
+
+            # Update latent
+            latents, _ = noise_scheduler.step(noise_pred, t, latents)
+
+            # Clear intermediate tensors
+            del noise_pred, down_block_res_samples, mid_block_res_sample
+
+        # Clear cache after each segment
+        torch.cuda.empty_cache()
+        logger.info(f"Completed denoising segment {segment+1}/{total_segments}")
+
+    # Decode latents to images
+    with torch.no_grad():
+        generated_image = recon_model(latents)
+
+    # Free latent memory
+    del latents
+    torch.cuda.empty_cache()
+
+    return generated_image
+
+
+def _create_and_save_visualization(
+        generated_image,
+        original_mask,
+        original_oct_path,
+        output_path,
+        sample_num,
+        epoch,
+        logger,
+        rank
+):
+    """Create and save a visualization comparing original OCT, generated image, and mask"""
+    # Convert tensors to numpy for matplotlib
+    gen_img_np = generated_image.squeeze(0).permute(1, 2, 0).numpy()
+    mask_np = original_mask.squeeze(0).squeeze(0).numpy()
+
+    # Create figure with subplots
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6), constrained_layout=True)
+
+    # Try to load and plot the original OCT image
+    try:
+        original_oct_img = Image.open(original_oct_path).convert("L")
+        original_oct_np = np.array(original_oct_img)
+        axes[0].imshow(original_oct_np, cmap="gray")
+        axes[0].set_title("Original OCT Image")
+    except Exception as e:
+        logger.warning(f"Could not load original OCT image from {original_oct_path}: {e}")
+        axes[0].text(0.5, 0.5, "Original OCT\nnot available", ha="center", va="center", transform=axes[0].transAxes)
+        axes[0].set_title("Original OCT Image")
+
+    axes[0].axis("off")
+
+    # Plot generated image
+    axes[1].imshow(gen_img_np, cmap="gray")
+    axes[1].set_title("Generated Image")
+    axes[1].axis("off")
+
+    # Plot mask
+    im = axes[2].imshow(mask_np, cmap="viridis")
+    axes[2].set_title("Mask/Condition")
+    axes[2].axis("off")
+
+    # Add a colorbar for the mask
+    plt.colorbar(im, ax=axes[2], shrink=0.6)
+
+    # Save figure and clean up
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    # Log to wandb
+    if rank == 0 and wandb.run is not None and sample_num < 5:
+        wandb.log({
+            f"validation/sample_{sample_num}": wandb.Image(
+                output_path,
+                caption=f"Epoch {epoch+1} - Sample {sample_num}"
+            )
+        })
+
+
+def _log_validation_to_wandb(metrics, val_vis_dir, epoch, num_samples):
+    """Log validation metrics and visualizations to wandb"""
+    # Log metrics
+    log_dict = {
+        "validation/loss": metrics["val_loss"],
+        "validation/epoch": epoch + 1,
+    }
+
+    if "val_weighted_loss" in metrics and metrics["val_weighted_loss"] is not None:
+        log_dict["validation/weighted_loss"] = metrics["val_weighted_loss"]
+
+    wandb.log(log_dict)
+
+    # Log validation sample grid
+    if val_vis_dir and os.path.exists(val_vis_dir) and len(os.listdir(val_vis_dir)) > 0:
+        sample_images = [
+            f"{val_vis_dir}/sample_{i}.png" for i in range(min(5, num_samples))
+        ]
+        sample_images = [img for img in sample_images if os.path.exists(img)]
+
+        if sample_images:
+            wandb.log({
+                "validation/sample_grid": [wandb.Image(img) for img in sample_images]
+            })
