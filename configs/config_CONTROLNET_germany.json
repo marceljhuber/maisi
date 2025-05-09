@@ -7,7 +7,7 @@
     "environment": {
         "exp_name": "germany",
         "data_dir": "/home/user/Thesis/data/RETOUCH_TRAIN_SPECTRALIS",
-        "model_dir": "./models/CONTROLNET/germany",
+        "model_dir": "./models",
         "output_dir": "./outputs",
         "tfevent_path": "./outputs/tfevent",
         "trained_autoencoder_path": "./models/VAE/lima_best.pt",
@@ -17,8 +17,8 @@
     "training": {
         "num_classes": 5,
         "batch_size": 64,
-        "save_every": 5,
-        "generate_every": 5,
+        "save_every": 25,
+        "generate_every": 25,
         "num_workers": 16,
         "controlnet_train": {
             "batch_size": 64,
