@@ -12,7 +12,7 @@
         "tfevent_path": "./outputs/tfevent",
         "trained_autoencoder_path": "./models/VAE/lima_best.pt",
         "trained_diffusion_path": "./models/DIFF/ida/runs_50.pt",
-        "trained_controlnet_path": null
+        "trained_controlnet_path": "./models/CONTROLNET/germany/checkpoints/germany_4975.pt"
     },
     "training": {
         "num_classes": 5,

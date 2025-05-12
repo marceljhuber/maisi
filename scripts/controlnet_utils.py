@@ -8,6 +8,8 @@ import time
 from datetime import timedelta
 
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')  # Force non-interactive backend
 import numpy as np
 import torch
 from PIL import Image
@@ -50,7 +52,7 @@ def validate_and_visualize(
         epoch,
         save_dir,
         scale_factor=1.0,
-        num_samples=5,
+        num_samples=20,
         weighted_loss=1.0,
         weighted_loss_label=None,
         rank=0,
@@ -318,7 +320,7 @@ def _generate_validation_visualizations(
                     continue
 
 
-def _denoise_sample(unet, controlnet, noise_scheduler, condition, recon_model, device, sample_idx=0, total_samples=5):
+def _denoise_sample(unet, controlnet, noise_scheduler, condition, recon_model, device):
     """Denoise a single sample in a single pass"""
     # Initialize with random noise
     latents = initialize_noise_latents((4, 64, 64), device)

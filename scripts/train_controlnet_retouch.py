@@ -138,12 +138,11 @@ def train_controlnet(
     # Create directories for model checkpoints and visualizations
     model_dir = config['environment']['model_dir']
     exp_name = config['environment']['exp_name']
-    checkpoints_dir = os.path.join(model_dir, "checkpoints")
-    vis_dir = os.path.join(model_dir, "visualizations")
-    val_vis_dir = os.path.join(model_dir, "validation_visualizations")
+    exp_dir = os.path.join(model_dir, 'CONTROLNET', exp_name)
+    checkpoints_dir = os.path.join(exp_dir, "checkpoints")
+    val_vis_dir = os.path.join(exp_dir, "val_visualizations")
 
     os.makedirs(checkpoints_dir, exist_ok=True)
-    os.makedirs(vis_dir, exist_ok=True)
     os.makedirs(val_vis_dir, exist_ok=True)
 
     if weighted_loss > 1.0:
@@ -298,7 +297,7 @@ def train_controlnet(
                             epoch=epoch,
                             save_dir=val_vis_dir,
                             scale_factor=scale_factor,
-                            num_samples=5,
+                            num_samples=20,
                             weighted_loss=weighted_loss,
                             weighted_loss_label=weighted_loss_label,
                             rank=rank,
@@ -330,7 +329,7 @@ def train_controlnet(
 
                 # Save checkpoint with careful error handling
                 try:
-                    print(f"Saving checkpoint for epoch {epoch+1}")
+                    print(f"Checkpoint saving for epoch {epoch+1}")
                     checkpoint_start = time.time()
 
                     # Get state dict
@@ -338,17 +337,19 @@ def train_controlnet(
                         controlnet.module.state_dict() if world_size > 1 else controlnet.state_dict()
                     )
 
-                    # Save regular checkpoint
-                    checkpoint_path = os.path.join(checkpoints_dir, f"{exp_name}_{epoch}.pt")
-                    torch.save(
-                        {
-                            "epoch": epoch + 1,
-                            "train_loss": epoch_loss,
-                            "val_loss": val_loss,
-                            "controlnet_state_dict": controlnet_state_dict,
-                        },
-                        checkpoint_path,
-                    )
+                    # Save regular checkpoint only every generate_every epochs
+                    if epoch % args['generate_every'] == 0:
+                        print(f"Saving regular checkpoint for epoch {epoch+1}")
+                        checkpoint_path = os.path.join(checkpoints_dir, f"{exp_name}_{epoch}.pt")
+                        torch.save(
+                            {
+                                "epoch": epoch + 1,
+                                "train_loss": epoch_loss,
+                                "val_loss": val_loss,
+                                "controlnet_state_dict": controlnet_state_dict,
+                            },
+                            checkpoint_path,
+                        )
 
                     # Save best validation model if needed
                     if val_loss < best_val_loss:
