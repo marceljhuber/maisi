@@ -2,7 +2,6 @@
     "main": {
         "jobname": "germany",
         "run_dir": "./runs"
-
     },
     "environment": {
         "exp_name": "germany",
@@ -20,6 +19,7 @@
         "save_every": 25,
         "generate_every": 25,
         "num_workers": 16,
+        "seed": 69,
         "controlnet_train": {
             "batch_size": 64,
             "cache_rate": 0.0,

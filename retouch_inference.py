@@ -82,7 +82,7 @@ def load_masks(mask_names, mask_path):
     return mask_files
 
 
-def generate_noise_vectors(num_samples, latent_shape, device, output_dir):
+def generate_noise_vectors(num_samples, latent_shape, device, output_dir, seed=42):
     """
     Generate random noise vectors for diffusion sampling
 
@@ -91,6 +91,7 @@ def generate_noise_vectors(num_samples, latent_shape, device, output_dir):
         latent_shape: Shape of the latent noise vector
         device: PyTorch device
         output_dir: Directory to save noise vectors
+        seed: Random seed for reproducibility (default: None)
 
     Returns:
         list: List of noise latent tensors
@@ -110,7 +111,13 @@ def generate_noise_vectors(num_samples, latent_shape, device, output_dir):
             noise = torch.load(vector_path, map_location=device)
             noise_vectors.append(noise)
     else:
-        print(f"Generating {num_samples} new noise vectors")
+        # Set random seed if provided
+        if seed is not None:
+            torch.manual_seed(seed)
+            print(f"Generating {num_samples} new noise vectors with seed {seed}")
+        else:
+            print(f"Generating {num_samples} new noise vectors with random seed")
+
         noise_vectors = []
         for i in range(num_samples):
             noise = torch.randn(latent_shape, device=device, dtype=torch.float32)
@@ -446,9 +453,6 @@ def create_comparison_grid(masks, controlnet_images, original_images, output_dir
         if num_samples == 1:
             axes = axes.reshape(1, -1)
 
-        # Add a title to the figure
-        fig.suptitle(f"Comparison for mask: {mask_prefix}", fontsize=16)
-
         # Column titles
         col_titles = ["Mask", "ControlNet Output", "Original (No ControlNet)"]
         for i, title in enumerate(col_titles):
@@ -489,8 +493,9 @@ def main():
     parser = argparse.ArgumentParser(description="ControlNet Inference")
     parser.add_argument("--config_path", type=str, help="Path to config JSON file", default="./configs/config_CONTROLNET_germany.json")
     parser.add_argument("--mask_path", type=str, help="Path to directory containing mask files", default="/home/user/Thesis/data/retouch_masks")
-    parser.add_argument("--masks", nargs="+", default=["0.png", "10.png", "11.png", "12.png", "13.png"], help="List of mask filenames to use (e.g., 0.png 1.png)")
-    parser.add_argument("--num_samples", type=int, help="Number of samples to generate per mask", default=5)
+    # parser.add_argument("--masks", nargs="+", default=["0.png", "1.png", "4.png", "7.png", "11.png", "14.png", "15.png", "16.png", "20.png"], help="List of mask filenames to use (e.g., 0.png 1.png)")
+    parser.add_argument("--masks", nargs="+", default=["0.png", "1.png"], help="List of mask filenames to use (e.g., 0.png 1.png)")
+    parser.add_argument("--num_samples", type=int, help="Number of samples to generate per mask", default=4)
     parser.add_argument("--output_dir", type=str, default=None, help="Output directory for generated images")
     cli_args = parser.parse_args()
 
@@ -603,7 +608,8 @@ def main():
         num_samples=cli_args.num_samples,
         latent_shape=(1, 4, 64, 64),  # Default latent shape
         device=device,
-        output_dir=cli_args.output_dir
+        output_dir=cli_args.output_dir,
+        seed=args.seed,
     )
 
     # Process each mask
