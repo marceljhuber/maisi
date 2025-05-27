@@ -297,7 +297,7 @@ def train_controlnet(
                             epoch=epoch,
                             save_dir=val_vis_dir,
                             scale_factor=scale_factor,
-                            num_samples=20,
+                            num_samples=5,
                             weighted_loss=weighted_loss,
                             weighted_loss_label=weighted_loss_label,
                             rank=rank,
@@ -448,7 +448,7 @@ def main():
     parser = argparse.ArgumentParser(description="maisi.controlnet.training")
     parser.add_argument(
         "--config_path",
-        default="./configs/config_CONTROLNET_germany.json",
+        default="./configs/config_CONTROLNET_germany_ddim.json",
         help="config json file that stores controlnet settings",
     )
     parser.add_argument(
