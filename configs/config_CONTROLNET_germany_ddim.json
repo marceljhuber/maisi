@@ -97,7 +97,7 @@
         },
         "noise_scheduler": {
             "_target_": "monai.networks.schedulers.ddim.DDIMScheduler",
-            "num_train_timesteps": 50,
+            "num_train_timesteps": 1000,
             "beta_start": 0.0015,
             "beta_end": 0.0195,
             "schedule": "scaled_linear_beta",

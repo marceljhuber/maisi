@@ -318,7 +318,12 @@ class ImageGenerator:
                     )
 
                     # Update latents
-                    latents, _ = noise_scheduler.step(noise_pred, timestep, latents)
+                    latents, _ = noise_scheduler.step(
+                        noise_pred,
+                        timestep,
+                        latents,  # , eta=1.0
+                        # todo
+                    )
 
         return latents
 
