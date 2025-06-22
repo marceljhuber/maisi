@@ -28,7 +28,7 @@ print_config()
 ########################################################################################################################
 # Step 1: Training Config Preparation
 ########################################################################################################################
-config_path = "./configs/config_CONTROLNET_germany.json"
+config_path = "./configs/config_CONTROLNET_germany_ddim.json"
 
 with open(config_path, "r") as f:
     config = json.load(f)

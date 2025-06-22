@@ -99,7 +99,7 @@ def validate_and_visualize(
         os.makedirs(val_vis_dir, exist_ok=True)
 
     # Set up inference timesteps
-    noise_scheduler.set_timesteps(1000, device=device)
+    # noise_scheduler.set_timesteps(1000, device=device)
 
     # Collect validation metrics
     metrics = _compute_validation_metrics(
