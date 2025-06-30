@@ -158,6 +158,20 @@ def _compute_validation_metrics(
             # Get full batch data
             inputs = batch[0].squeeze(1).to(device) * scale_factor
             labels = batch[1].to(device)
+
+            ############################################################################################################
+            # First, convert labels to 5 channels
+            labels_5ch = split_grayscale_to_channels(labels)  # [64, 5, 256, 256]
+
+            # Scale up inputs from 64x64 to 256x256
+            inputs_upscaled = F.interpolate(inputs, size=(256, 256), mode='bilinear', align_corners=False)
+            # inputs_upscaled: [64, 4, 256, 256]
+
+            # Concatenate along channel dimension (dim=1)
+            combined_labels = torch.cat([labels_5ch, inputs_upscaled], dim=1)
+            # Result: [64, 9, 256, 256] (5 + 4 = 9 channels)
+            ############################################################################################################
+
             sub_batch_size = 1  # Process 1 sample at a time for max memory efficiency
 
             # Process in sub-batches
@@ -165,8 +179,7 @@ def _compute_validation_metrics(
                 end_idx = min(start_idx + sub_batch_size, inputs.shape[0])
 
                 sub_inputs = inputs[start_idx:end_idx].to(torch.float32)
-                sub_labels = labels[start_idx:end_idx]
-                sub_labels_channels = split_grayscale_to_channels(sub_labels)
+                sub_combined_labels = combined_labels[start_idx:end_idx]  # Already 9 channels
 
                 # Random timesteps
                 timesteps = torch.randint(0, noise_scheduler.num_train_timesteps,
@@ -184,7 +197,7 @@ def _compute_validation_metrics(
                     down_block_res_samples, mid_block_res_sample = controlnet(
                         x=noisy_latent,
                         timesteps=timesteps,
-                        controlnet_cond=sub_labels_channels.float()
+                        controlnet_cond=sub_combined_labels.float()  # 9-channel combined labels
                     )
 
                     noise_pred = unet(
@@ -265,9 +278,22 @@ def _generate_validation_visualizations(
 
     # Process each batch of samples
     for batch_idx, batch in tqdm(enumerate(sample_batches)):
-        inputs = batch[0].squeeze(1).to(device) * scale_factor  # Latent
-        labels = batch[1].to(device)  # Condition/mask
-        labels_channels = split_grayscale_to_channels(labels)
+        inputs = batch[0].squeeze(1).to(device) * scale_factor  # Latent [batch, 4, 64, 64]
+        labels = batch[1].to(device)  # Condition/mask [batch, 1, 256, 256]
+
+        ############################################################################################################
+        # Apply the same preprocessing as in training/validation
+        labels_5ch = split_grayscale_to_channels(labels)  # [batch, 5, 256, 256]
+
+        # Scale up inputs from 64x64 to 256x256
+        inputs_upscaled = F.interpolate(inputs, size=(256, 256), mode='bilinear', align_corners=False)
+        # inputs_upscaled: [batch, 4, 256, 256]
+
+        # Concatenate along channel dimension (dim=1)
+        combined_labels = torch.cat([labels_5ch, inputs_upscaled], dim=1)
+        # Result: [batch, 9, 256, 256] (5 + 4 = 9 channels)
+        ############################################################################################################
+
         batch_size = inputs.shape[0]
 
         # Process samples in the batch
@@ -279,8 +305,8 @@ def _generate_validation_visualizations(
 
                 sample_num = batch_idx * batch_size + sample_idx
 
-                # Extract individual sample
-                sample_label = labels_channels[sample_idx:sample_idx+1].float()
+                # Extract individual sample - now with 9 channels
+                sample_condition = combined_labels[sample_idx:sample_idx+1].float()  # [1, 9, 256, 256]
 
                 try:
                     # Generate denoised image
@@ -288,7 +314,7 @@ def _generate_validation_visualizations(
                         unet=unet,
                         controlnet=controlnet,
                         noise_scheduler=noise_scheduler,
-                        condition=sample_label,
+                        condition=sample_condition,  # Now 9 channels
                         recon_model=recon_model,
                         device=device
                     )
@@ -297,7 +323,7 @@ def _generate_validation_visualizations(
                     generated_image = torch.clip(generated_image, b_min, b_max).cpu()
                     generated_image = (generated_image - b_min) / (b_max - b_min)
 
-                    # Get original mask
+                    # Get original mask (still use original labels for visualization)
                     original_mask = labels[sample_idx:sample_idx+1].cpu()
 
                     # Get source paths

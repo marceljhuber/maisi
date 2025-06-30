@@ -173,6 +173,14 @@ def train_controlnet(
                     labels = batch[1].to(device)
                     labels = split_grayscale_to_channels(labels)
 
+                    # Scale up inputs from 64x64 to 256x256
+                    inputs_upscaled = F.interpolate(inputs, size=(256, 256), mode='bilinear', align_corners=False)
+                    # inputs_upscaled: torch.Size([64, 4, 256, 256])
+
+                    # Concatenate along channel dimension (dim=1)
+                    labels = torch.cat([labels, inputs_upscaled], dim=1)
+                    # Result: torch.Size([64, 9, 256, 256])
+
                     # Clear gradients
                     optimizer.zero_grad(set_to_none=True)
 
@@ -297,7 +305,7 @@ def train_controlnet(
                             epoch=epoch,
                             save_dir=val_vis_dir,
                             scale_factor=scale_factor,
-                            num_samples=20,
+                            num_samples=5,
                             weighted_loss=weighted_loss,
                             weighted_loss_label=weighted_loss_label,
                             rank=rank,
@@ -448,7 +456,7 @@ def main():
     parser = argparse.ArgumentParser(description="maisi.controlnet.training")
     parser.add_argument(
         "--config_path",
-        default="./configs/config_CONTROLNET_germany.json",
+        default="./configs/config_CONTROLNET_germany_ddim.json",
         help="config json file that stores controlnet settings",
     )
     parser.add_argument(

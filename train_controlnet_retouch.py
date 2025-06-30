@@ -28,7 +28,7 @@ print_config()
 ########################################################################################################################
 # Step 1: Training Config Preparation
 ########################################################################################################################
-config_path = "./configs/config_CONTROLNET_germany_ddim.json"
+config_path = "./configs/config_CONTROLNET_hungary.json"
 
 with open(config_path, "r") as f:
     config = json.load(f)
@@ -120,10 +120,12 @@ os.environ["OMP_NUM_THREADS"] = "1"
 
 # Import the module
 sys.path.append(".")
-train_module = importlib.import_module("scripts.train_controlnet_retouch")
+# train_module = importlib.import_module("scripts.train_controlnet_retouch")
+train_module = importlib.import_module("scripts.train_controlnet_retouch_newobjective")
 
 # Set up sys.argv to simulate command line arguments
-sys.argv = ["train_controlnet_retouch.py", "--config", config_path]
+# sys.argv = ["train_controlnet_retouch.py", "--config", config_path]
+sys.argv = ["train_controlnet_retouch_newobjective.py", "--config", config_path]
 
 # Call the main function
 print("Training the model...")

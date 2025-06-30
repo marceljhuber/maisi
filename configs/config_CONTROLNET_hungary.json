@@ -1,0 +1,152 @@
+{
+    "main": {
+        "jobname": "hungary",
+        "run_dir": "./runs"
+    },
+    "environment": {
+        "exp_name": "hungary",
+        "data_dir": "/home/user/Thesis/data/RETOUCH_TRAIN_SPECTRALIS",
+        "model_dir": "./models",
+        "output_dir": "./outputs",
+        "tfevent_path": "./outputs/tfevent",
+        "trained_autoencoder_path": "./models/VAE/lima_best.pt",
+        "trained_diffusion_path": "./models/DIFF/ida/runs_50.pt",
+        "trained_controlnet_path": null
+    },
+    "training": {
+        "num_classes": 9,
+        "batch_size": 64,
+        "save_every": 25,
+        "generate_every": 25,
+        "num_workers": 16,
+        "seed": 69,
+        "controlnet_train": {
+            "batch_size": 64,
+            "cache_rate": 0.0,
+            "fold": 0,
+            "lr": 1e-5,
+            "n_epochs": 5000,
+            "weighted_loss_label": [null],
+            "weighted_loss": 1
+        },
+        "controlnet_infer": {
+           "num_inference_steps": 10,
+           "autoencoder_sliding_window_infer_size": [96, 96, 96]
+        }
+    },
+    "model_def": {
+        "spatial_dims": 2,
+        "image_channels": 1,
+        "latent_channels": 4,
+        "mask_generation_latent_shape": [4, 64, 64],
+        "autoencoder_def": {
+            "_target_": "networks.autoencoderkl_maisi.AutoencoderKlMaisi",
+            "spatial_dims": "@spatial_dims",
+            "in_channels": "@image_channels",
+            "out_channels": "@image_channels",
+            "latent_channels": "@latent_channels",
+            "num_channels": [64, 128, 256],
+            "num_res_blocks": [2,2,2],
+            "norm_num_groups": 32,
+            "norm_eps": 1e-06,
+            "attention_levels": [
+                false,
+                false,
+                false
+            ],
+            "with_encoder_nonlocal_attn": false,
+            "with_decoder_nonlocal_attn": false,
+            "use_checkpointing": false,
+            "use_convtranspose": false,
+            "norm_float16": true,
+            "num_splits": 8,
+            "dim_split": 1
+        },
+        "diffusion_unet_def": {
+            "_target_": "monai.apps.generation.maisi.networks.diffusion_model_unet_maisi.DiffusionModelUNetMaisi",
+            "spatial_dims": "@spatial_dims",
+            "in_channels": "@latent_channels",
+            "out_channels": "@latent_channels",
+            "num_channels": [64, 128, 256, 512],
+            "attention_levels": [false, false, true, true],
+            "num_head_channels": [0, 0, 32, 32],
+            "num_res_blocks": 2,
+            "use_flash_attention": true,
+            "include_top_region_index_input": false,
+            "include_bottom_region_index_input": false,
+            "include_spacing_input": false
+        },
+        "controlnet_def": {
+            "_target_": "monai.apps.generation.maisi.networks.controlnet_maisi.ControlNetMaisi",
+            "spatial_dims": "@spatial_dims",
+            "in_channels": "@latent_channels",
+            "num_channels": [64, 128, 256, 512],
+            "attention_levels": [
+                false,
+                false,
+                true,
+                true
+            ],
+            "num_head_channels": [
+                0, 0, 32, 32
+            ],
+            "num_res_blocks": 2,
+            "use_flash_attention": true,
+            "conditioning_embedding_in_channels": 9,
+            "conditioning_embedding_num_channels": [32, 64, 128]
+        },
+        "noise_scheduler": {
+            "_target_": "monai.networks.schedulers.ddpm.DDPMScheduler",
+            "num_train_timesteps": 1000,
+            "beta_start": 0.0015,
+            "beta_end": 0.0195,
+            "schedule": "scaled_linear_beta",
+            "clip_sample": false
+        }
+    },
+    "model": {
+            "autoencoder": {
+                "spatial_dims": 2,
+                "in_channels": 1,
+                "out_channels": 1,
+                "latent_channels": 4,
+                "num_channels": [64, 128, 256],
+                "num_res_blocks": [2, 2, 2],
+                "norm_num_groups": 32,
+                "norm_eps": 1e-6,
+                "attention_levels": [false, false, false],
+                "with_encoder_nonlocal_attn": false,
+                "with_decoder_nonlocal_attn": false,
+                "use_checkpointing": false,
+                "use_convtranspose": false,
+                "norm_float16": true,
+                "num_splits": 1,
+                "dim_split": 1
+            },
+            "discriminator": {
+                "spatial_dims": 2,
+                "num_layers_d": 3,
+                "channels": 32,
+                "in_channels": 1,
+                "out_channels": 1,
+                "norm": "INSTANCE"
+            }
+    },
+    "data": {
+        "image_dir1": "/home/mhuber/Thesis/data/KermanyV3_resized/test",
+        "image_dir2": "/optima/exchange/mhuber/KermanyV3_resized/train",
+        "image_dir": "/home/mhuber/Thesis/data/KermanyV3_resized/test",
+        "train_transform": {
+            "resize": [256, 256],
+            "random_crop_scale": [0.8, 1.0],
+            "random_flip_prob": 0.5,
+            "random_rotation_angle": 10,
+            "brightness_adjustment": 0.2,
+            "contrast_adjustment": 0.2,
+            "speckle_noise_std": 0.1
+        },
+        "val_transform": {
+            "resize": [256, 256]
+        }
+    }
+}
