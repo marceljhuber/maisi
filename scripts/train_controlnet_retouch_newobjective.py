@@ -9,102 +9,53 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import argparse
-import json
-import logging
-import os
-import random
-import sys
-import time
-from datetime import timedelta
-
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
-import torch.distributed as dist
-import torch.nn.functional as F
-from monai.networks.utils import copy_model_state
-from monai.utils import RankFilter
-
 # from torch.cuda.amp import GradScaler, autocast
-from torch.amp import GradScaler, autocast
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.tensorboard import SummaryWriter
-from torchvision.utils import make_grid
-
-from datetime import datetime
-import wandb
-from networks.autoencoderkl_maisi import AutoencoderKlMaisi
-from scripts.controlnet_utils import validate_and_visualize
-from scripts.utils_data import (
-    create_latent_dataloaders,
-    create_cluster_dataloaders,
-    create_oct_dataloaders,
-    split_grayscale_to_channels,
-)
-from .utils import (
-    define_instance,
-    setup_ddp,
-)
-
-from scripts.sample import ReconModel, initialize_noise_latents
-
 
 
 import argparse
 import json
 import logging
 import os
-import random
 import sys
 import time
-import gc
 from datetime import timedelta, datetime
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict, List, Optional
 
-import matplotlib.pyplot as plt
-import numpy as np
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 import torch.nn.functional as F
-from torch.amp import GradScaler, autocast
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.tensorboard import SummaryWriter
-from torchvision.utils import make_grid
+import wandb
 from monai.networks.utils import copy_model_state
 from monai.utils import RankFilter
+from torch.amp import GradScaler, autocast
 
-import wandb
 from networks.autoencoderkl_maisi import AutoencoderKlMaisi
 from scripts.controlnet_utils import validate_and_visualize
 from scripts.utils_data import (
-    create_latent_dataloaders,
-    create_cluster_dataloaders,
     create_oct_dataloaders,
     split_grayscale_to_channels,
 )
-from .utils import define_instance, setup_ddp
-from scripts.sample import ReconModel, initialize_noise_latents
+from .utils import define_instance
 
 
 def train_controlnet(
-        autoencoder: torch.nn.Module,
-        unet: torch.nn.Module,
-        controlnet: torch.nn.Module,
-        noise_scheduler,
-        train_loader: torch.utils.data.DataLoader,
-        val_loader: torch.utils.data.DataLoader,
-        optimizer: torch.optim.Optimizer,
-        lr_scheduler,
-        device: torch.device,
-        config: Dict,
-        logger: logging.Logger,
-        scale_factor: float,
-        weighted_loss: float = 1.0,
-        weighted_loss_label: Optional[List[int]] = None,
-        rank: int = 0,
-        world_size: int = 1,
-        use_ddp: bool = False,
+    autoencoder: torch.nn.Module,
+    unet: torch.nn.Module,
+    controlnet: torch.nn.Module,
+    noise_scheduler,
+    train_loader: torch.utils.data.DataLoader,
+    val_loader: torch.utils.data.DataLoader,
+    optimizer: torch.optim.Optimizer,
+    lr_scheduler,
+    device: torch.device,
+    config: Dict,
+    logger: logging.Logger,
+    scale_factor: float,
+    weighted_loss: float = 1.0,
+    weighted_loss_label: Optional[List[int]] = None,
+    rank: int = 0,
+    world_size: int = 1,
 ) -> None:
     """
     Main training loop for ControlNet
@@ -126,19 +77,18 @@ def train_controlnet(
         weighted_loss_label: Labels for regions with weighted loss
         rank: Process rank
         world_size: Total number of processes
-        use_ddp: Whether using distributed training
     """
-    args = config['training']
-    n_epochs = args['controlnet_train']['n_epochs']
+    args = config["training"]
+    n_epochs = args["controlnet_train"]["n_epochs"]
     scaler = GradScaler("cuda")
     total_step = 0
-    best_train_loss = float('inf')
-    best_val_loss = float('inf')
+    best_train_loss = float("inf")
+    best_val_loss = float("inf")
 
     # Create directories for model checkpoints and visualizations
-    model_dir = config['environment']['model_dir']
-    exp_name = config['environment']['exp_name']
-    exp_dir = os.path.join(model_dir, 'CONTROLNET', exp_name)
+    model_dir = config["environment"]["model_dir"]
+    exp_name = config["environment"]["exp_name"]
+    exp_dir = os.path.join(model_dir, "CONTROLNET", exp_name)
     checkpoints_dir = os.path.join(exp_dir, "checkpoints")
     val_vis_dir = os.path.join(exp_dir, "val_visualizations")
 
@@ -146,7 +96,9 @@ def train_controlnet(
     os.makedirs(val_vis_dir, exist_ok=True)
 
     if weighted_loss > 1.0:
-        print(f"Applying weighted loss = {weighted_loss} on labels: {weighted_loss_label}")
+        print(
+            f"Applying weighted loss = {weighted_loss} on labels: {weighted_loss_label}"
+        )
 
     # Set models to correct states
     controlnet.train()
@@ -174,7 +126,9 @@ def train_controlnet(
                     labels = split_grayscale_to_channels(labels)
 
                     # Scale up inputs from 64x64 to 256x256
-                    inputs_upscaled = F.interpolate(inputs, size=(256, 256), mode='bilinear', align_corners=False)
+                    inputs_upscaled = F.interpolate(
+                        inputs, size=(256, 256), mode="bilinear", align_corners=False
+                    )
                     # inputs_upscaled: torch.Size([64, 4, 256, 256])
 
                     # Concatenate along channel dimension (dim=1)
@@ -191,8 +145,10 @@ def train_controlnet(
 
                         # Get random timesteps
                         timesteps = torch.randint(
-                            0, noise_scheduler.num_train_timesteps,
-                            (inputs.shape[0],), device=device
+                            0,
+                            noise_scheduler.num_train_timesteps,
+                            (inputs.shape[0],),
+                            device=device,
                         ).long()
 
                         # Add noise to inputs
@@ -202,7 +158,10 @@ def train_controlnet(
 
                         # ControlNet forward pass
                         down_block_res_samples, mid_block_res_sample = controlnet(
-                            x=noisy_latent, timesteps=timesteps, controlnet_cond=labels.float()
+                            x=noisy_latent,
+                            timesteps=timesteps,
+                            controlnet_cond=labels.float(),
+                            use_cls_token=True,
                         )
 
                         # UNet forward pass
@@ -219,8 +178,10 @@ def train_controlnet(
                                 inputs, labels, weighted_loss, weighted_loss_label
                             )
                             loss = (
-                                    F.l1_loss(noise_pred.float(), noise.float(), reduction="none")
-                                    * weights
+                                F.l1_loss(
+                                    noise_pred.float(), noise.float(), reduction="none"
+                                )
+                                * weights
                             ).mean()
                         else:
                             loss = F.l1_loss(noise_pred.float(), noise.float())
@@ -245,16 +206,20 @@ def train_controlnet(
                     if rank == 0:
                         # Log to wandb periodically
                         if step % 50 == 0 and wandb.run is not None:
-                            wandb.log({
-                                "train/loss": loss.item(),
-                                "train/learning_rate": lr_scheduler.get_last_lr()[0],
-                                "train/batch_time": batch_time,
-                                "train/step": total_step,
-                            })
+                            wandb.log(
+                                {
+                                    "train/loss": loss.item(),
+                                    "train/learning_rate": lr_scheduler.get_last_lr()[
+                                        0
+                                    ],
+                                    "train/batch_time": batch_time,
+                                    "train/step": total_step,
+                                }
+                            )
 
                         # Print progress
                         if step == 0:
-                            print(f"\n" + "=="*50)
+                            print(f"\n" + "==" * 50)
                         if step % 5 == 0:  # Print more frequently to see progress
                             batches_done = step + 1
                             batches_left = len(train_loader) - batches_done
@@ -267,20 +232,17 @@ def train_controlnet(
                             )
 
                 except Exception as e:
-                    logger.error(f"Error processing batch {step} in epoch {epoch+1}: {e}")
+                    logger.error(
+                        f"Error processing batch {step} in epoch {epoch+1}: {e}"
+                    )
                     continue
 
-            print("=="*50)
+            print("==" * 50)
 
             # Compute epoch metrics
             avg_batch_time = sum(batch_times) / max(len(batch_times), 1)
             avg_loss = sum(losses) / max(len(losses), 1)
             epoch_loss = epoch_loss / max(len(train_loader), 1)
-
-            # Sync metrics across processes if using DDP
-            if use_ddp:
-                dist.barrier()
-                dist.all_reduce(torch.tensor(epoch_loss, device=device), op=torch.distributed.ReduceOp.AVG)
 
             # Validation and checkpointing on rank 0
             if rank == 0:
@@ -288,7 +250,7 @@ def train_controlnet(
 
                 try:
                     # Determine whether to generate visuals
-                    generate_visuals = (epoch % args['generate_every'] == 0)
+                    generate_visuals = epoch % args["generate_every"] == 0
 
                     # Run validation
                     val_start_time = time.time()
@@ -298,7 +260,9 @@ def train_controlnet(
                         val_loss = validate_and_visualize(
                             autoencoder=autoencoder,
                             unet=unet,
-                            controlnet=controlnet.module if world_size > 1 else controlnet,
+                            controlnet=(
+                                controlnet.module if world_size > 1 else controlnet
+                            ),
                             noise_scheduler=noise_scheduler,
                             val_loader=val_loader,
                             device=device,
@@ -317,23 +281,27 @@ def train_controlnet(
                         val_loss = previous_val_loss
 
                     val_time = time.time() - val_start_time
-                    print(f"Validation completed in {val_time:.2f}s, loss: {val_loss:.6f}")
+                    print(
+                        f"Validation completed in {val_time:.2f}s, loss: {val_loss:.6f}"
+                    )
 
                 except Exception as e:
                     print(f"Error during validation for epoch {epoch+1}: {e}")
-                    val_loss = float('inf')
+                    val_loss = float("inf")
 
                 # Log epoch metrics to wandb
                 if wandb.run is not None:
-                    wandb.log({
-                        "epoch": epoch + 1,
-                        "epoch/avg_train_loss": avg_loss,
-                        "epoch/avg_val_loss": val_loss,
-                        "epoch/avg_batch_time": avg_batch_time,
-                        "epoch/learning_rate": lr_scheduler.get_last_lr()[0],
-                        "epoch/best_train_loss": min(best_train_loss, avg_loss),
-                        "epoch/best_val_loss": min(best_val_loss, val_loss),
-                    })
+                    wandb.log(
+                        {
+                            "epoch": epoch + 1,
+                            "epoch/avg_train_loss": avg_loss,
+                            "epoch/avg_val_loss": val_loss,
+                            "epoch/avg_batch_time": avg_batch_time,
+                            "epoch/learning_rate": lr_scheduler.get_last_lr()[0],
+                            "epoch/best_train_loss": min(best_train_loss, avg_loss),
+                            "epoch/best_val_loss": min(best_val_loss, val_loss),
+                        }
+                    )
 
                 # Save checkpoint with careful error handling
                 try:
@@ -342,13 +310,17 @@ def train_controlnet(
 
                     # Get state dict
                     controlnet_state_dict = (
-                        controlnet.module.state_dict() if world_size > 1 else controlnet.state_dict()
+                        controlnet.module.state_dict()
+                        if world_size > 1
+                        else controlnet.state_dict()
                     )
 
                     # Save regular checkpoint only every generate_every epochs
-                    if epoch % args['generate_every'] == 0:
+                    if epoch % args["generate_every"] == 0:
                         print(f"Saving regular checkpoint for epoch {epoch+1}")
-                        checkpoint_path = os.path.join(checkpoints_dir, f"{exp_name}_{epoch}.pt")
+                        checkpoint_path = os.path.join(
+                            checkpoints_dir, f"{exp_name}_{epoch}.pt"
+                        )
                         torch.save(
                             {
                                 "epoch": epoch + 1,
@@ -363,7 +335,9 @@ def train_controlnet(
                     if val_loss < best_val_loss:
                         best_val_loss = val_loss
                         print(f"New best validation loss -> {best_val_loss:.6f}")
-                        best_val_path = os.path.join(model_dir, f"{exp_name}_best_val.pt")
+                        best_val_path = os.path.join(
+                            model_dir, f"{exp_name}_best_val.pt"
+                        )
                         torch.save(
                             {
                                 "epoch": epoch + 1,
@@ -395,11 +369,6 @@ def train_controlnet(
                 except Exception as e:
                     print(f"Error saving checkpoint for epoch {epoch+1}: {e}")
 
-            # Sync processes if using DDP
-            if use_ddp:
-                torch.cuda.synchronize()  # Make sure CUDA operations are done
-                dist.barrier()
-
             print(f"Completed epoch {epoch+1}/{n_epochs}")
 
         except Exception as e:
@@ -408,11 +377,17 @@ def train_controlnet(
             # Try to save emergency checkpoint on rank 0
             if rank == 0:
                 try:
-                    emergency_path = os.path.join(checkpoints_dir, f"emergency_{exp_name}_{epoch}.pt")
+                    emergency_path = os.path.join(
+                        checkpoints_dir, f"emergency_{exp_name}_{epoch}.pt"
+                    )
                     torch.save(
                         {
                             "epoch": epoch + 1,
-                            "controlnet_state_dict": controlnet.module.state_dict() if world_size > 1 else controlnet.state_dict(),
+                            "controlnet_state_dict": (
+                                controlnet.module.state_dict()
+                                if world_size > 1
+                                else controlnet.state_dict()
+                            ),
                         },
                         emergency_path,
                     )
@@ -420,7 +395,7 @@ def train_controlnet(
                 except Exception as e:
                     print(f"Failed to save emergency checkpoint: {e}")
 
-        print("=="*50, f"\n")
+        print("==" * 50, f"\n")
 
     # Finish training
     print("Training completed")
@@ -441,12 +416,16 @@ def create_weighted_loss_mask(inputs, labels, weighted_loss, weighted_loss_label
     # For each target label, add to the mask
     for label in weighted_loss_label:
         for channel in range(interpolate_label.shape[1]):
-            channel_mask = (interpolate_label[:, channel:channel+1] == label).float()
+            channel_mask = (
+                interpolate_label[:, channel : channel + 1] == label
+            ).float()
             roi_mask = roi_mask + channel_mask
 
     # Convert to binary mask and apply weights
     roi_mask = (roi_mask > 0).float()
-    weights = weights.masked_fill(roi_mask.repeat(1, inputs.shape[1], 1, 1) > 0, weighted_loss)
+    weights = weights.masked_fill(
+        roi_mask.repeat(1, inputs.shape[1], 1, 1) > 0, weighted_loss
+    )
 
     return weights
 
@@ -471,17 +450,9 @@ def main():
     # Setup logging
     logger = logging.getLogger("maisi.controlnet.training")
 
-    # Setup DDP if using multiple GPUs
-    use_ddp = args.gpus > 1
-    if use_ddp:
-        rank = int(os.environ["LOCAL_RANK"])
-        world_size = int(os.environ["WORLD_SIZE"])
-        device = setup_ddp(rank, world_size)
-        logger.addFilter(RankFilter())
-    else:
-        rank = 0
-        world_size = 1
-        device = torch.device(f"cuda:{rank}")
+    rank = 0
+    world_size = 1
+    device = torch.device(f"cuda:{rank}")
 
     torch.cuda.set_device(device)
     print(f"Number of GPUs: {torch.cuda.device_count()}")
@@ -518,7 +489,10 @@ def main():
     print("==" * 50)
     print("Creating data loaders")
     train_loader, val_loader = create_oct_dataloaders(
-        data_dir=args.data_dir, batch_size=args.batch_size, num_workers=args.num_workers, train_ratio=0.9
+        data_dir=args.data_dir,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        train_ratio=0.9,
     )
 
     # Setup model directories
@@ -574,9 +548,25 @@ def main():
     else:
         logger.warning("No trained diffusion model provided.")
 
-    # Initialize ControlNet
+    # Initialize ControlNet ############################################################################################
     print("Initializing ControlNet model")
     controlnet = define_instance(args, "controlnet_def").to(device)
+
+    # Add CLS token to existing instance
+    controlnet.cls_token = nn.Parameter(torch.zeros(1, 4, 64, 64)).to(device)
+    nn.init.normal_(controlnet.cls_token, std=0.02)
+
+    # Store original forward method
+    original_forward = controlnet.forward
+
+    def forward_with_cls(x, timesteps, controlnet_cond, use_cls_token=False):
+        if use_cls_token:
+            batch_size = x.shape[0]
+            x = controlnet.cls_token.expand(batch_size, -1, -1, -1)
+        return original_forward(x, timesteps, controlnet_cond)
+
+    # Replace forward method
+    controlnet.forward = forward_with_cls
     copy_model_state(controlnet, unet.state_dict())
 
     # Load pretrained ControlNet if available
@@ -585,11 +575,14 @@ def main():
             raise ValueError("ControlNet checkpoint not found.")
 
         controlnet.load_state_dict(
-            torch.load(args.trained_controlnet_path, map_location=device)["controlnet_state_dict"]
+            torch.load(args.trained_controlnet_path, map_location=device)[
+                "controlnet_state_dict"
+            ]
         )
         print(f"Loaded ControlNet from {args.trained_controlnet_path}")
     else:
         print("Training ControlNet from scratch")
+    ####################################################################################################################
 
     # Freeze UNet parameters
     for p in unet.parameters():
@@ -597,15 +590,6 @@ def main():
 
     # Initialize noise scheduler
     noise_scheduler = define_instance(args, "noise_scheduler")
-
-    # Wrap model in DDP if using multiple GPUs
-    if use_ddp:
-        controlnet = DDP(
-            controlnet,
-            device_ids=[device],
-            output_device=rank,
-            find_unused_parameters=True,
-        )
 
     # Setup training configuration
     weighted_loss = args.controlnet_train["weighted_loss"]
@@ -620,8 +604,8 @@ def main():
 
     # Calculate total training steps
     total_steps = (
-                          args.controlnet_train["n_epochs"] * len(train_loader.dataset)
-                  ) / args.controlnet_train["batch_size"]
+        args.controlnet_train["n_epochs"] * len(train_loader.dataset)
+    ) / args.controlnet_train["batch_size"]
     print(f"Total number of training steps: {total_steps}")
 
     # Initialize learning rate scheduler
@@ -648,14 +632,9 @@ def main():
             weighted_loss_label=weighted_loss_label,
             rank=rank,
             world_size=world_size,
-            use_ddp=use_ddp,
         )
     except Exception as e:
         logger.critical(f"Critical training error: {e}", exc_info=True)
-
-    # Clean up DDP if used
-    if use_ddp:
-        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
@@ -673,7 +652,9 @@ if __name__ == "__main__":
         f"logs/controlnet_training_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     )
     file_handler.setFormatter(
-        logging.Formatter("[%(asctime)s.%(msecs)03d][%(levelname)5s](%(name)s) - %(message)s")
+        logging.Formatter(
+            "[%(asctime)s.%(msecs)03d][%(levelname)5s](%(name)s) - %(message)s"
+        )
     )
     logging.getLogger().addHandler(file_handler)
 

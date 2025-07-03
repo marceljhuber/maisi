@@ -789,7 +789,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--config_path",
         type=str,
-        default="./configs/config_CONTROLNET_germany.json",
+        default="./configs/config_CONTROLNET_hungary.json",
         help="Path to configuration JSON file",
     )
     parser.add_argument(

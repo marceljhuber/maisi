@@ -5,19 +5,19 @@
     },
     "environment": {
         "exp_name": "hungary",
-        "data_dir": "/home/user/Thesis/data/RETOUCH_TRAIN_SPECTRALIS",
+        "data_dir": "/home/mhuber/Thesis/data/RETOUCH/RETOUCH_TRAIN_SPECTRALIS",
         "model_dir": "./models",
         "output_dir": "./outputs",
         "tfevent_path": "./outputs/tfevent",
         "trained_autoencoder_path": "./models/VAE/lima_best.pt",
         "trained_diffusion_path": "./models/DIFF/ida/runs_50.pt",
-        "trained_controlnet_path": null
+        "trained_controlnet_path": "./models/CONTROLNET/hungary/hungary_best.pt"
     },
     "training": {
         "num_classes": 9,
-        "batch_size": 64,
+        "batch_size": 32,
         "save_every": 25,
-        "generate_every": 25,
+        "generate_every": 10,
         "num_workers": 16,
         "seed": 69,
         "controlnet_train": {
@@ -30,7 +30,7 @@
             "weighted_loss": 1
         },
         "controlnet_infer": {
-           "num_inference_steps": 10,
+           "num_inference_steps": 1000,
            "autoencoder_sliding_window_infer_size": [96, 96, 96]
         }
     },

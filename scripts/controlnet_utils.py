@@ -9,7 +9,8 @@ from datetime import timedelta
 
 import matplotlib.pyplot as plt
 import matplotlib
-matplotlib.use('Agg')  # Force non-interactive backend
+
+matplotlib.use("Agg")  # Force non-interactive backend
 import numpy as np
 import torch
 from PIL import Image
@@ -42,21 +43,22 @@ from tqdm import tqdm
 
 from scripts.sample import ReconModel, initialize_noise_latents
 
+
 def validate_and_visualize(
-        autoencoder,
-        unet,
-        controlnet,
-        noise_scheduler,
-        val_loader,
-        device,
-        epoch,
-        save_dir,
-        scale_factor=1.0,
-        num_samples=20,
-        weighted_loss=1.0,
-        weighted_loss_label=None,
-        rank=0,
-        generate_visuals=True,
+    autoencoder,
+    unet,
+    controlnet,
+    noise_scheduler,
+    val_loader,
+    device,
+    epoch,
+    save_dir,
+    scale_factor=1.0,
+    num_samples=20,
+    weighted_loss=1.0,
+    weighted_loss_label=None,
+    rank=0,
+    generate_visuals=True,
 ):
     """
     Validate the model on the validation set, compute loss metrics,
@@ -89,7 +91,9 @@ def validate_and_visualize(
     unet.eval()
 
     # Create reconstruction model
-    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(device)
+    recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
+        device
+    )
 
     # Create directory for validation visualizations if needed
     val_vis_dir = None
@@ -97,6 +101,7 @@ def validate_and_visualize(
     if generate_visuals:
         val_vis_dir = os.path.join(save_dir, f"epoch_{epoch + 1}_validation")
         os.makedirs(val_vis_dir, exist_ok=True)
+        print(f"Saving visualizations for validation set at {val_vis_dir}")
 
     # Set up inference timesteps
     # noise_scheduler.set_timesteps(1000, device=device)
@@ -128,7 +133,7 @@ def validate_and_visualize(
             recon_model=recon_model,
             scale_factor=scale_factor,
             num_samples=num_samples,
-            rank=rank
+            rank=rank,
         )
 
     # Log metrics to wandb
@@ -142,8 +147,15 @@ def validate_and_visualize(
 
 
 def _compute_validation_metrics(
-        autoencoder, unet, controlnet, noise_scheduler, val_loader, device,
-        scale_factor, weighted_loss, weighted_loss_label
+    autoencoder,
+    unet,
+    controlnet,
+    noise_scheduler,
+    val_loader,
+    device,
+    scale_factor,
+    weighted_loss,
+    weighted_loss_label,
 ):
     """Memory-efficient validation metrics computation with mixed precision"""
     total_loss = 0.0
@@ -164,7 +176,9 @@ def _compute_validation_metrics(
             labels_5ch = split_grayscale_to_channels(labels)  # [64, 5, 256, 256]
 
             # Scale up inputs from 64x64 to 256x256
-            inputs_upscaled = F.interpolate(inputs, size=(256, 256), mode='bilinear', align_corners=False)
+            inputs_upscaled = F.interpolate(
+                inputs, size=(256, 256), mode="bilinear", align_corners=False
+            )
             # inputs_upscaled: [64, 4, 256, 256]
 
             # Concatenate along channel dimension (dim=1)
@@ -179,11 +193,17 @@ def _compute_validation_metrics(
                 end_idx = min(start_idx + sub_batch_size, inputs.shape[0])
 
                 sub_inputs = inputs[start_idx:end_idx].to(torch.float32)
-                sub_combined_labels = combined_labels[start_idx:end_idx]  # Already 9 channels
+                sub_combined_labels = combined_labels[
+                    start_idx:end_idx
+                ]  # Already 9 channels
 
                 # Random timesteps
-                timesteps = torch.randint(0, noise_scheduler.num_train_timesteps,
-                                          (sub_inputs.shape[0],), device=device).long()
+                timesteps = torch.randint(
+                    0,
+                    noise_scheduler.num_train_timesteps,
+                    (sub_inputs.shape[0],),
+                    device=device,
+                ).long()
 
                 # Add noise
                 noise = torch.randn_like(sub_inputs, dtype=torch.float32)
@@ -197,7 +217,7 @@ def _compute_validation_metrics(
                     down_block_res_samples, mid_block_res_sample = controlnet(
                         x=noisy_latent,
                         timesteps=timesteps,
-                        controlnet_cond=sub_combined_labels.float()  # 9-channel combined labels
+                        controlnet_cond=sub_combined_labels.float(),  # 9-channel combined labels
                     )
 
                     noise_pred = unet(
@@ -214,7 +234,12 @@ def _compute_validation_metrics(
                 total_samples += sub_inputs.shape[0]
 
                 # Free memory
-                del noise_pred, noisy_latent, down_block_res_samples, mid_block_res_sample
+                del (
+                    noise_pred,
+                    noisy_latent,
+                    down_block_res_samples,
+                    mid_block_res_sample,
+                )
                 torch.cuda.empty_cache()
 
     return {"val_loss": total_loss / max(total_samples, 1)}
@@ -226,15 +251,15 @@ def _create_weighted_loss_mask(inputs, labels, weighted_loss, weighted_loss_labe
     roi_mask = torch.zeros_like(inputs[:, :1], dtype=torch.float32)
 
     # Interpolate labels to match latent dimensions
-    interpolate_label = F.interpolate(
-        labels, size=inputs.shape[2:], mode="nearest"
-    )
+    interpolate_label = F.interpolate(labels, size=inputs.shape[2:], mode="nearest")
 
     # For each target label, add to the mask
     for label in weighted_loss_label:
         for channel in range(interpolate_label.shape[1]):
             # Create mask for this channel/label combination
-            channel_mask = (interpolate_label[:, channel:channel+1] == label).float()
+            channel_mask = (
+                interpolate_label[:, channel : channel + 1] == label
+            ).float()
             roi_mask = roi_mask + channel_mask
 
     # Convert to binary mask and apply to weights
@@ -247,18 +272,18 @@ def _create_weighted_loss_mask(inputs, labels, weighted_loss, weighted_loss_labe
 
 
 def _generate_validation_visualizations(
-        autoencoder,
-        unet,
-        controlnet,
-        noise_scheduler,
-        val_loader,
-        device,
-        epoch,
-        val_vis_dir,
-        recon_model,
-        scale_factor,
-        num_samples,
-        rank
+    autoencoder,
+    unet,
+    controlnet,
+    noise_scheduler,
+    val_loader,
+    device,
+    epoch,
+    val_vis_dir,
+    recon_model,
+    scale_factor,
+    num_samples,
+    rank,
 ):
     """Generate validation visualizations for a subset of samples"""
     # Collect samples for visualization
@@ -278,7 +303,9 @@ def _generate_validation_visualizations(
 
     # Process each batch of samples
     for batch_idx, batch in tqdm(enumerate(sample_batches)):
-        inputs = batch[0].squeeze(1).to(device) * scale_factor  # Latent [batch, 4, 64, 64]
+        inputs = (
+            batch[0].squeeze(1).to(device) * scale_factor
+        )  # Latent [batch, 4, 64, 64]
         labels = batch[1].to(device)  # Condition/mask [batch, 1, 256, 256]
 
         ############################################################################################################
@@ -286,7 +313,9 @@ def _generate_validation_visualizations(
         labels_5ch = split_grayscale_to_channels(labels)  # [batch, 5, 256, 256]
 
         # Scale up inputs from 64x64 to 256x256
-        inputs_upscaled = F.interpolate(inputs, size=(256, 256), mode='bilinear', align_corners=False)
+        inputs_upscaled = F.interpolate(
+            inputs, size=(256, 256), mode="bilinear", align_corners=False
+        )
         # inputs_upscaled: [batch, 4, 256, 256]
 
         # Concatenate along channel dimension (dim=1)
@@ -297,7 +326,7 @@ def _generate_validation_visualizations(
         batch_size = inputs.shape[0]
 
         # Process samples in the batch
-        with torch.no_grad(), torch.amp.autocast('cuda'):
+        with torch.no_grad(), torch.amp.autocast("cuda"):
             # For each sample in the batch
             for sample_idx in range(batch_size):
                 if batch_idx * batch_size + sample_idx >= num_samples:
@@ -306,7 +335,9 @@ def _generate_validation_visualizations(
                 sample_num = batch_idx * batch_size + sample_idx
 
                 # Extract individual sample - now with 9 channels
-                sample_condition = combined_labels[sample_idx:sample_idx+1].float()  # [1, 9, 256, 256]
+                sample_condition = combined_labels[
+                    sample_idx : sample_idx + 1
+                ].float()  # [1, 9, 256, 256]
 
                 try:
                     # Generate denoised image
@@ -316,7 +347,7 @@ def _generate_validation_visualizations(
                         noise_scheduler=noise_scheduler,
                         condition=sample_condition,  # Now 9 channels
                         recon_model=recon_model,
-                        device=device
+                        device=device,
                     )
 
                     # Normalize generated image
@@ -324,11 +355,13 @@ def _generate_validation_visualizations(
                     generated_image = (generated_image - b_min) / (b_max - b_min)
 
                     # Get original mask (still use original labels for visualization)
-                    original_mask = labels[sample_idx:sample_idx+1].cpu()
+                    original_mask = labels[sample_idx : sample_idx + 1].cpu()
 
                     # Get source paths
                     current_latent_path = val_loader.dataset.oct_paths[sample_num]
-                    original_oct_path = current_latent_path.replace("_oct_latent.pt", "_oct.png")
+                    original_oct_path = current_latent_path.replace(
+                        "_oct_latent.pt", "_oct.png"
+                    )
 
                     # Create visualization
                     _create_and_save_visualization(
@@ -338,11 +371,13 @@ def _generate_validation_visualizations(
                         output_path=f"{val_vis_dir}/sample_{sample_num}.png",
                         sample_num=sample_num,
                         epoch=epoch,
-                        rank=rank
+                        rank=rank,
                     )
 
                 except Exception as e:
-                    print(f"Error generating visualization for sample {sample_num}: {e}")
+                    print(
+                        f"Error generating visualization for sample {sample_num}: {e}"
+                    )
                     continue
 
 
@@ -396,13 +431,13 @@ def _denoise_sample(unet, controlnet, noise_scheduler, condition, recon_model, d
 
 
 def _create_and_save_visualization(
-        generated_image,
-        original_mask,
-        original_oct_path,
-        output_path,
-        sample_num,
-        epoch,
-        rank
+    generated_image,
+    original_mask,
+    original_oct_path,
+    output_path,
+    sample_num,
+    epoch,
+    rank,
 ):
     """Create and save a visualization comparing original OCT, generated image, and mask"""
     # Convert tensors to numpy for matplotlib
@@ -420,7 +455,14 @@ def _create_and_save_visualization(
         axes[0].set_title("Original OCT Image")
     except Exception as e:
         print(f"Could not load original OCT image from {original_oct_path}: {e}")
-        axes[0].text(0.5, 0.5, "Original OCT\nnot available", ha="center", va="center", transform=axes[0].transAxes)
+        axes[0].text(
+            0.5,
+            0.5,
+            "Original OCT\nnot available",
+            ha="center",
+            va="center",
+            transform=axes[0].transAxes,
+        )
         axes[0].set_title("Original OCT Image")
 
     axes[0].axis("off")
@@ -444,12 +486,13 @@ def _create_and_save_visualization(
 
     # Log to wandb
     if rank == 0 and wandb.run is not None and sample_num < 5:
-        wandb.log({
-            f"validation/sample_{sample_num}": wandb.Image(
-                output_path,
-                caption=f"Epoch {epoch+1} - Sample {sample_num}"
-            )
-        })
+        wandb.log(
+            {
+                f"validation/sample_{sample_num}": wandb.Image(
+                    output_path, caption=f"Epoch {epoch+1} - Sample {sample_num}"
+                )
+            }
+        )
 
 
 def _log_validation_to_wandb(metrics, val_vis_dir, epoch, num_samples):
@@ -473,6 +516,6 @@ def _log_validation_to_wandb(metrics, val_vis_dir, epoch, num_samples):
         sample_images = [img for img in sample_images if os.path.exists(img)]
 
         if sample_images:
-            wandb.log({
-                "validation/sample_grid": [wandb.Image(img) for img in sample_images]
-            })
+            wandb.log(
+                {"validation/sample_grid": [wandb.Image(img) for img in sample_images]}
+            )

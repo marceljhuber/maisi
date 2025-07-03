@@ -60,11 +60,11 @@ class ControlNetInference:
     """
 
     def __init__(
-            self,
-            config_path: str,
-            mask_path: str,
-            output_dir: Optional[str] = None,
-            seed: int = 42
+        self,
+        config_path: str,
+        mask_path: str,
+        output_dir: Optional[str] = None,
+        seed: int = 42,
     ):
         """Initializes the ControlNet inference pipeline.
 
@@ -130,7 +130,7 @@ class ControlNetInference:
         # Create formatter
         formatter = logging.Formatter(
             "[%(asctime)s.%(msecs)03d][%(levelname)5s](%(name)s) - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
 
         # Add formatters to handlers
@@ -188,12 +188,18 @@ class ControlNetInference:
                     setattr(args, k, v)
 
         # Set model path attributes
-        for path_attr in ["trained_autoencoder_path", "trained_diffusion_path", "trained_controlnet_path"]:
+        for path_attr in [
+            "trained_autoencoder_path",
+            "trained_diffusion_path",
+            "trained_controlnet_path",
+        ]:
             setattr(args, path_attr, self.config["environment"][path_attr])
 
         return args
 
-    def _load_and_prepare_models(self) -> Tuple[torch.nn.Module, torch.nn.Module, torch.nn.Module, Any, float]:
+    def _load_and_prepare_models(
+        self,
+    ) -> Tuple[torch.nn.Module, torch.nn.Module, torch.nn.Module, Any, float]:
         """Loads and prepares all required models.
 
         Loads the autoencoder, UNet, and ControlNet models from checkpoints,
@@ -227,7 +233,9 @@ class ControlNetInference:
         controlnet.eval()
 
         # Convert models to float32 for consistent precision
-        return self._convert_models_to_float32((autoencoder, unet, controlnet, noise_scheduler, scale_factor))
+        return self._convert_models_to_float32(
+            (autoencoder, unet, controlnet, noise_scheduler, scale_factor)
+        )
 
     def _load_autoencoder(self) -> torch.nn.Module:
         """Loads the autoencoder model from checkpoint.
@@ -306,7 +314,9 @@ class ControlNetInference:
         controlnet = define_instance(self.args, "controlnet_def").to(self.device)
 
         # Load checkpoint
-        controlnet_ckpt = torch.load(controlnet_path, map_location=self.device, weights_only=True)
+        controlnet_ckpt = torch.load(
+            controlnet_path, map_location=self.device, weights_only=True
+        )
         controlnet.load_state_dict(controlnet_ckpt["controlnet_state_dict"])
 
         self.logger.info(f"Loaded ControlNet from {controlnet_path}")
@@ -350,7 +360,9 @@ class ControlNetInference:
         self.logger.info(f"Found {len(mask_files)} mask files in {self.mask_path}")
         return mask_files
 
-    def generate_noise_vectors(self, num_samples: int, latent_shape: Tuple[int, ...]) -> List[torch.Tensor]:
+    def generate_noise_vectors(
+        self, num_samples: int, latent_shape: Tuple[int, ...]
+    ) -> List[torch.Tensor]:
         """Generates or loads random noise vectors for diffusion sampling.
 
         Args:
@@ -364,29 +376,38 @@ class ControlNetInference:
         existing_vectors = sorted(self.noise_dir.glob("noise_*.pt"))
 
         if len(existing_vectors) >= num_samples:
-            self.logger.info(f"Using {num_samples} existing noise vectors from {self.noise_dir}")
-            return [torch.load(v, map_location=self.device) for v in existing_vectors[:num_samples]]
+            self.logger.info(
+                f"Using {num_samples} existing noise vectors from {self.noise_dir}"
+            )
+            return [
+                torch.load(v, map_location=self.device)
+                for v in existing_vectors[:num_samples]
+            ]
         else:
             # Set random seed for reproducibility
             torch.manual_seed(self.seed)
-            self.logger.info(f"Generating {num_samples} new noise vectors with seed {self.seed}")
+            self.logger.info(
+                f"Generating {num_samples} new noise vectors with seed {self.seed}"
+            )
 
             noise_vectors = []
             for i in range(num_samples):
-                noise = torch.randn(latent_shape, device=self.device, dtype=torch.float32)
+                noise = torch.randn(
+                    latent_shape, device=self.device, dtype=torch.float32
+                )
                 torch.save(noise, self.noise_dir / f"noise_{i:03d}.pt")
                 noise_vectors.append(noise)
 
             return noise_vectors
 
     def denoise_with_controlnet(
-            self,
-            unet: torch.nn.Module,
-            controlnet: torch.nn.Module,
-            noise_scheduler: Any,
-            condition: torch.Tensor,
-            initial_latent: torch.Tensor,
-            verbose: bool = False
+        self,
+        unet: torch.nn.Module,
+        controlnet: torch.nn.Module,
+        noise_scheduler: Any,
+        condition: torch.Tensor,
+        initial_latent: torch.Tensor,
+        verbose: bool = False,
     ) -> torch.Tensor:
         """Denoises a sample using ControlNet and UNet with deterministic results.
 
@@ -415,7 +436,11 @@ class ControlNetInference:
         timesteps = noise_scheduler.timesteps
 
         # Setup progress tracking
-        progress_iter = tqdm(enumerate(timesteps), total=len(timesteps)) if verbose else enumerate(timesteps)
+        progress_iter = (
+            tqdm(enumerate(timesteps), total=len(timesteps))
+            if verbose
+            else enumerate(timesteps)
+        )
 
         # Denoise step by step
         for i, t in progress_iter:
@@ -447,11 +472,11 @@ class ControlNetInference:
         return latents
 
     def denoise_without_controlnet(
-            self,
-            unet: torch.nn.Module,
-            noise_scheduler: Any,
-            initial_latent: torch.Tensor,
-            verbose: bool = False
+        self,
+        unet: torch.nn.Module,
+        noise_scheduler: Any,
+        initial_latent: torch.Tensor,
+        verbose: bool = False,
     ) -> torch.Tensor:
         """Denoises a sample using only UNet (no ControlNet) with deterministic results.
 
@@ -475,7 +500,11 @@ class ControlNetInference:
         timesteps = noise_scheduler.timesteps
 
         # Setup progress tracking
-        progress_iter = tqdm(enumerate(timesteps), total=len(timesteps)) if verbose else enumerate(timesteps)
+        progress_iter = (
+            tqdm(enumerate(timesteps), total=len(timesteps))
+            if verbose
+            else enumerate(timesteps)
+        )
 
         # Denoise step by step
         for i, t in progress_iter:
@@ -499,12 +528,12 @@ class ControlNetInference:
         return latents
 
     def save_generated_image(
-            self,
-            generated_image: torch.Tensor,
-            prefix: str,
-            sample_idx: int,
-            mask_idx: int = 0,
-            is_grayscale: bool = False
+        self,
+        generated_image: torch.Tensor,
+        prefix: str,
+        sample_idx: int,
+        mask_idx: int = 0,
+        is_grayscale: bool = False,
     ) -> Path:
         """Saves a generated image to disk.
 
@@ -523,10 +552,14 @@ class ControlNetInference:
 
         # Normalize to 0-1 range if needed
         if gen_img_np.min() < 0 or gen_img_np.max() > 1:
-            gen_img_np = (gen_img_np - gen_img_np.min()) / (gen_img_np.max() - gen_img_np.min())
+            gen_img_np = (gen_img_np - gen_img_np.min()) / (
+                gen_img_np.max() - gen_img_np.min()
+            )
 
         # Define output path with mask index to prevent overwriting
-        output_path = self.output_dir / f"{prefix}_mask{mask_idx:02d}_sample{sample_idx:03d}.png"
+        output_path = (
+            self.output_dir / f"{prefix}_mask{mask_idx:02d}_sample{sample_idx:03d}.png"
+        )
 
         # Create figure and save image with appropriate colormap
         fig = plt.figure(figsize=(8, 8))
@@ -547,11 +580,11 @@ class ControlNetInference:
         return output_path
 
     def process_mask(
-            self,
-            mask_path: Path,
-            noise_vectors: List[torch.Tensor],
-            mask_idx: int,
-            num_samples: int = 1
+        self,
+        mask_path: Path,
+        noise_vectors: List[torch.Tensor],
+        mask_idx: int,
+        num_samples: int = 1,
     ) -> Dict[str, Any]:
         """Processes a mask with both ControlNet and UNet.
 
@@ -570,12 +603,16 @@ class ControlNetInference:
         autoencoder, unet, controlnet, noise_scheduler, scale_factor = self.models
 
         # Create reconstruction model
-        recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(self.device)
+        recon_model = ReconModel(autoencoder=autoencoder, scale_factor=scale_factor).to(
+            self.device
+        )
 
         # Load and prepare mask
         mask = Image.open(mask_path).convert("L")
         mask_tensor = torch.from_numpy(np.array(mask)).float() / 255.0
-        mask_tensor = mask_tensor.unsqueeze(0).unsqueeze(0).to(self.device, dtype=torch.float32)
+        mask_tensor = (
+            mask_tensor.unsqueeze(0).unsqueeze(0).to(self.device, dtype=torch.float32)
+        )
 
         # Split grayscale mask to channels if needed
         mask_channels = split_grayscale_to_channels(mask_tensor)
@@ -595,12 +632,14 @@ class ControlNetInference:
                 noise = noise.to(dtype=torch.float32)
 
                 # First, generate image without ControlNet
-                self.logger.info(f"Generating original (no ControlNet) for vector {i+1}")
+                self.logger.info(
+                    f"Generating original (no ControlNet) for vector {i+1}"
+                )
                 original_latent = self.denoise_without_controlnet(
                     unet=unet,
                     noise_scheduler=noise_scheduler,
                     initial_latent=noise,
-                    verbose=True
+                    verbose=True,
                 )
 
                 # Decode the latent with autocast
@@ -619,7 +658,7 @@ class ControlNetInference:
                     prefix="original",
                     sample_idx=i,
                     mask_idx=mask_idx,
-                    is_grayscale=True  # Save as grayscale if appropriate
+                    is_grayscale=True,  # Save as grayscale if appropriate
                 )
 
                 without_controlnet_images.append(original_path)
@@ -630,14 +669,16 @@ class ControlNetInference:
                 torch.cuda.empty_cache()
 
                 # Now generate with ControlNet
-                self.logger.info(f"Generating ControlNet version for vector {i+1} with mask {mask_prefix}")
+                self.logger.info(
+                    f"Generating ControlNet version for vector {i+1} with mask {mask_prefix}"
+                )
                 controlled_latent = self.denoise_with_controlnet(
                     unet=unet,
                     controlnet=controlnet,
                     noise_scheduler=noise_scheduler,
                     condition=mask_channels,
                     initial_latent=noise,
-                    verbose=True
+                    verbose=True,
                 )
 
                 # Decode the latent with autocast
@@ -655,7 +696,7 @@ class ControlNetInference:
                     prefix=mask_prefix,
                     sample_idx=i,
                     mask_idx=mask_idx,
-                    is_grayscale=True  # Save as grayscale if appropriate
+                    is_grayscale=True,  # Save as grayscale if appropriate
                 )
 
                 with_controlnet_images.append(controlled_path)
@@ -668,12 +709,13 @@ class ControlNetInference:
             except Exception as e:
                 self.logger.error(f"Error processing vector {i+1}: {e}")
                 import traceback
+
                 self.logger.error(traceback.format_exc())
 
         return {
             "mask_path": mask_path,
             "controlnet_images": with_controlnet_images,
-            "original_images": without_controlnet_images
+            "original_images": without_controlnet_images,
         }
 
     def create_comparison_grid(self, results: List[Dict[str, Any]]) -> Path:
@@ -697,31 +739,33 @@ class ControlNetInference:
         # Column titles
         col_titles = ["Mask", "ControlNet Output", "Original (No ControlNet)"]
         for i, title in enumerate(col_titles):
-            fig.text(0.15 + 0.35 * i, 0.98, title, ha='center', fontsize=14)
+            fig.text(0.15 + 0.35 * i, 0.98, title, ha="center", fontsize=14)
 
         # Fill the grid
         for i, result in enumerate(results):
             # First column: mask
             mask_img = Image.open(result["mask_path"]).convert("L")
             mask_np = np.array(mask_img) / 255.0
-            axes[i, 0].imshow(mask_np, cmap='gray')  # Always use grayscale for masks
+            axes[i, 0].imshow(mask_np, cmap="gray")  # Always use grayscale for masks
             mask_name = result["mask_path"].name
             axes[i, 0].set_title(f"Mask: {mask_name}")
-            axes[i, 0].axis('off')
+            axes[i, 0].axis("off")
 
             # Second column: ControlNet output
             ctrl_image = Image.open(result["controlnet_images"][0])
             ctrl_np = np.array(ctrl_image)
-            axes[i, 1].imshow(ctrl_np, cmap='gray')  # Use grayscale for ControlNet output
+            axes[i, 1].imshow(
+                ctrl_np, cmap="gray"
+            )  # Use grayscale for ControlNet output
             axes[i, 1].set_title(f"ControlNet")
-            axes[i, 1].axis('off')
+            axes[i, 1].axis("off")
 
             # Third column: Original image (no ControlNet)
             orig_image = Image.open(result["original_images"][0])
             orig_np = np.array(orig_image)
-            axes[i, 2].imshow(orig_np, cmap='gray')  # Use grayscale for original output
+            axes[i, 2].imshow(orig_np, cmap="gray")  # Use grayscale for original output
             axes[i, 2].set_title(f"UNet Only")
-            axes[i, 2].axis('off')
+            axes[i, 2].axis("off")
 
         # Save the grid
         grid_path = self.output_dir / "complete_comparison_grid.png"
@@ -747,7 +791,7 @@ class ControlNetInference:
         # Generate noise vectors
         noise_vectors = self.generate_noise_vectors(
             num_samples=1,  # Only need one noise vector per mask
-            latent_shape=(1, 4, 64, 64)
+            latent_shape=(1, 4, 64, 64),
         )
 
         # Process each mask
@@ -760,12 +804,14 @@ class ControlNetInference:
                 mask_path=mask_file,
                 noise_vectors=noise_vectors,
                 mask_idx=i,  # Pass mask index to prevent overwriting
-                num_samples=1  # Just one sample per mask
+                num_samples=1,  # Just one sample per mask
             )
             all_results.append(result)
 
         total_time = time.time() - start_time
-        self.logger.info(f"\nProcessed {len(all_results)} masks in {total_time:.2f} seconds")
+        self.logger.info(
+            f"\nProcessed {len(all_results)} masks in {total_time:.2f} seconds"
+        )
 
         # Create comparison grid
         self.create_comparison_grid(all_results)
@@ -780,31 +826,28 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         description="ControlNet Inference",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--config_path",
         type=str,
         help="Path to config JSON file",
-        default="./configs/config_CONTROLNET_germany.json"
+        default="./configs/config_CONTROLNET_germany.json",
     )
     parser.add_argument(
         "--mask_path",
         type=str,
         help="Path to directory containing mask files",
-        default="/home/user/Thesis/data/retouch_masks/new_mask_dir"
+        default="/home/mhuber/Thesis/data/RETOUCH/retouch_masks",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
         default=None,
-        help="Output directory for generated images"
+        help="Output directory for generated images",
     )
     parser.add_argument(
-        "--seed",
-        type=int,
-        default=324568,
-        help="Random seed for reproducibility"
+        "--seed", type=int, default=324568, help="Random seed for reproducibility"
     )
     return parser.parse_args()
 
@@ -820,7 +863,7 @@ def main() -> None:
             config_path=args.config_path,
             mask_path=args.mask_path,
             output_dir=args.output_dir,
-            seed=args.seed
+            seed=args.seed,
         )
 
         # Run inference
@@ -829,6 +872,7 @@ def main() -> None:
     except Exception as e:
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 
