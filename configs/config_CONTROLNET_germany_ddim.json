@@ -12,7 +12,7 @@
         "trained_autoencoder_path": "./models/VAE/lima_best.pt",
         "trained_diffusion_path": "./models/DIFF/ida/runs_50.pt",
         "trained_controlnet_path2": "./models/CONTROLNET/germany/germany_best.pt",
-        "trained_controlnet_path": "./models/CONTROLNET/germany_ddim/checkpoints/germany_ddim_575.pt"
+        "trained_controlnet_path": "./models/CONTROLNET/germany/germany_best_val.pt"
     },
     "training": {
         "num_classes": 5,
@@ -31,7 +31,7 @@
             "weighted_loss": 1
         },
         "controlnet_infer": {
-           "num_inference_steps": 1000
+           "num_inference_steps": 100
         }
     },
     "model_def": {
@@ -136,7 +136,7 @@
         },
         "noise_scheduler": {
             "_target_": "monai.networks.schedulers.ddim.DDIMScheduler",
-            "num_train_timesteps": 1000,
+            "num_train_timesteps": 2500,
             "beta_start": 0.0015,
             "beta_end": 0.0195,
             "schedule": "scaled_linear_beta",

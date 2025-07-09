@@ -22,12 +22,10 @@ from datetime import timedelta, datetime
 from typing import Dict, List, Optional
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 from monai.networks.utils import copy_model_state
-from monai.utils import RankFilter
 from torch.amp import GradScaler, autocast
 
 from networks.autoencoderkl_maisi import AutoencoderKlMaisi
@@ -107,7 +105,6 @@ def train_controlnet(
 
     # Training loop
     print(f"Starting training for {n_epochs} epochs")
-    prev_time = time.time()
 
     for epoch in range(n_epochs):
         epoch_loss = 0.0
@@ -156,12 +153,15 @@ def train_controlnet(
                             original_samples=inputs, noise=noise, timesteps=timesteps
                         )
 
+                        # During training
+                        batch_size = noisy_latent.shape[0]
+                        cls_token = controlnet.cls_token.expand(batch_size, -1, -1, -1)
+
                         # ControlNet forward pass
                         down_block_res_samples, mid_block_res_sample = controlnet(
-                            x=noisy_latent,
+                            x=cls_token,
                             timesteps=timesteps,
                             controlnet_cond=labels.float(),
-                            use_cls_token=True,
                         )
 
                         # UNet forward pass
@@ -556,17 +556,6 @@ def main():
     controlnet.cls_token = nn.Parameter(torch.zeros(1, 4, 64, 64)).to(device)
     nn.init.normal_(controlnet.cls_token, std=0.02)
 
-    # Store original forward method
-    original_forward = controlnet.forward
-
-    def forward_with_cls(x, timesteps, controlnet_cond, use_cls_token=False):
-        if use_cls_token:
-            batch_size = x.shape[0]
-            x = controlnet.cls_token.expand(batch_size, -1, -1, -1)
-        return original_forward(x, timesteps, controlnet_cond)
-
-    # Replace forward method
-    controlnet.forward = forward_with_cls
     copy_model_state(controlnet, unet.state_dict())
 
     # Load pretrained ControlNet if available

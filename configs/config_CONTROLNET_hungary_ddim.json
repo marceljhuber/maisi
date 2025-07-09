@@ -96,8 +96,8 @@
             "conditioning_embedding_num_channels": [32, 64, 128]
         },
         "noise_scheduler": {
-            "_target_": "monai.networks.schedulers.ddpm.DDPMScheduler",
-            "num_train_timesteps": 1000,
+            "_target_": "monai.networks.schedulers.ddim.DDIMScheduler",
+            "num_train_timesteps": 2500,
             "beta_start": 0.0015,
             "beta_end": 0.0195,
             "schedule": "scaled_linear_beta",
