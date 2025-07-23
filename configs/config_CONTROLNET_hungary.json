@@ -11,7 +11,7 @@
         "tfevent_path": "./outputs/tfevent",
         "trained_autoencoder_path": "./models/VAE/lima_best.pt",
         "trained_diffusion_path": "./models/DIFF/ida/runs_50.pt",
-        "trained_controlnet_path": "./models/CONTROLNET/hungary/checkpoints/hungary_360.pt"
+        "trained_controlnet_path": "./models/CONTROLNET/hungary/hungary_best.pt"
     },
     "training": {
         "num_classes": 9,
